@@ -1,0 +1,12 @@
+[package]
+name = "ps2-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ee-core = { path = "../ee-core" }
+iop-core = { path = "../iop-core" }
+corosensei = "0.3"
+rayon = "1.10"
+wgpu = "29"
+bytemuck = "1"

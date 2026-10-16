@@ -1,0 +1,5 @@
+# Build for the CPU the game runs on (AVX2 / SSE4.1 / FMA where present): single-instruction
+# floor / round, wider vectorisation in the rasteriser and the translated code. Rust never fuses
+# multiply-add on its own, so the float results stay the same.
+[build]
+rustflags = ["-C", "target-cpu=native"]
