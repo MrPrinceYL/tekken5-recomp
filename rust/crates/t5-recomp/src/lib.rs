@@ -11,10 +11,13 @@ pub fn disc_path() -> String {
 }
 
 /// Create the machine (RAM, devices, the disc) and return what the front end shares with it.
+pub mod devil_debug;
+
 pub fn boot() -> ps2_runtime::Shared {
     ps2_runtime::diag::init("t5_trace.log");
     // The VU micro code translated from sheets/vu_microcode.csv.
     t5_vu::register();
+    devil_debug::install();
     ps2_runtime::create(&disc_path(), PROGRAMS, IOP_MODULES)
 }
 

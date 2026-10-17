@@ -278,6 +278,10 @@ pub fn boost_thread_on(slot: Option<usize>) {
     }
 }
 
+/// Called at the start of every vertical blank on the guest thread: the game crate's opt-in
+/// switches that set guest data (t5_recomp::devil_debug). Unset: nothing happens.
+pub static VBLANK_HOOK: std::sync::OnceLock<fn(&mut Machine)> = std::sync::OnceLock::new();
+
 pub fn machine_opt() -> Option<&'static Machine> {
     unsafe { MACHINE.as_ref() }
 }
@@ -551,6 +555,9 @@ pub fn service(c: &mut Ctx) {
         m.field ^= 1;
         VBLANKS.fetch_add(1, Relaxed);
         diag::tl("EE vblank");
+        if let Some(hook) = VBLANK_HOOK.get() {
+            hook(m);
+        }
         // T5_COVERFIELD=1: the EE functions entered in each field (coverfield.txt).
         if diag::enabled("T5_COVERFIELD") {
             ee_core::COVER_ON.store(true, Relaxed);
