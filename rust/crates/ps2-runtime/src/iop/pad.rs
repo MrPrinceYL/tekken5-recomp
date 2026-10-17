@@ -118,7 +118,10 @@ pub fn update(m: &mut Machine) {
         rec[0x50..0x54].copy_from_slice(&[4, 0, 7, 0]);
         rec[0x58..0x5C].copy_from_slice(&frame.to_le_bytes());
         rec[0x60..0x64].copy_from_slice(&(len as u32).to_le_bytes());
-        rec[0x64] = 1; // modeConfig
+        // modeConfig: padman writes 2 when the controller answers the config-mode query
+        // (DualShock 2), 1 after ten failed tries. libpad's InfoMode(CUREXID) returns 0 for 1, and
+        // the game (0x239658) then never asks for analog mode, so the sticks stay at 0x80.
+        rec[0x64] = 2;
         rec[0x65] = mode;
         rec[0x66] = 3; // model: DualShock 2
         rec[0x67] = 1;

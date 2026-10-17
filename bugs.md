@@ -13,8 +13,13 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
       (vermutlich Analogwerte/Neutralstellung, siehe B1).
 - [ ] B3 Options → Game Options: Auf „Rounds“ ändert Links/Rechts die Difficulty
       (Eingabe oder Menülogik prüfen, evtl. B1).
-- [ ] B15 Stick-Bewegungen werden vom Spiel nicht erkannt (Nutzer 17.10., unter Linux
-      getestet). B1-Fix (`Input::sticks`) prüfen: kommen Achswerte über gilrs/HID an?
+- [~] B15 Stick-Bewegungen werden vom Spiel nicht erkannt (Nutzer 17.10., unter Linux
+      getestet). **Ursache (17.10.):** padman-HLE schrieb pad_data +0x64 modeConfig = 1. Das
+      echte padman (in main `.dmh` eingebettet, Code +0x2840) setzt 2, wenn der Controller die
+      Konfig-Abfrage beantwortet (DualShock 2), 1 erst nach 10 Fehlversuchen. libpad
+      `scePadInfoMode(CUREXID)` (0x10C648) liefert bei 1 → 0, die Pad-Statusmaschine des Spiels
+      (0x239658) ruft dann nie `scePadSetMainMode(analog)` auf, und 0x239500 setzt die Sticks
+      im Digitalmodus fest auf 0x80. Fix: modeConfig = 2 (`iop/pad.rs`). Nutzertest offen.
 
 ## P2 Ton
 - [x] B4 Kampf: keine Musik. (Nutzer 17.10.: Musik da)
@@ -102,6 +107,18 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         sio2man #51/#61/#62). Braucht HLE für dbcman (wie padman) bzw. SIO2-Pad-Emulation.
         Menüweg headless: MODE SELECT 7× DOWN, CROSS, [RIGHT=T2], CROSS, CROSS (Controls),
         CROSS (NO speichern), LEFT + CROSS.
+
+- [~] B16 Devil Within: 30 fps und Zeitlupe (Nutzer 17.10.).
+      - Messung (headless, im Spiel, 17.10.): GAME FRAMES 150 / 5 s, MTVU-Worker ~3000 ms /
+        5 s (= ~20 ms pro Bild, Grenze 16,7 ms → Spiel lässt jedes 2. Bild aus), davon VU1
+        ~2700 ms bei ~125 Mio. Paaren = ~21 ns/Paar (Tekken 5 mit Shapes: 2–4 ns).
+      - VU1-Mikrocode von Devil Within ist komplett im Sheet (`T5_VUDUMP`-Lauf: 0 neue Paare/
+        Blöcke, nur VU0-Starts offen), keine Status-Leser. Aber 3654 von 4003 VU1-Blöcken
+        haben keine Eintritts-Shapes (gesammelt nur Moonlit/Polar) → generischer Blockpfad.
+      - Nächster Schritt: Shapes im Fenster sammeln (`set T5_VUSHAPES=1` vor `play.bat`,
+        Devil Within einige Minuten spielen → `rust\vu_dumps\shapes.txt`), dann
+        `gen_vu.py --collect-shapes`, `gen_vu.py`, neu bauen. Ob das allein für 60 reicht, ist
+        nicht gemessen.
 
 ## Selbst gefunden
 - [x] S0 **Fehlende EE-Funktionen** 0x2EE660 / 0x2EE6A0 / 0x2EE6E0: virtuelle Methoden (Aufruf per
