@@ -58,9 +58,23 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
       - EE-FPU / VU-Semantik (`ee-core/fpu.rs`, `vu0.rs`) geprüft: kein IEEE, Überlauf geklemmt,
         Denormale = 0 - keine offensichtliche Ursache. (PCSX2 GameIndex SLUS-21059: eeClampMode 2
         „Fixes camera …“.)
-      - Nächster Schritt: Weg der Flare-Pakete finden (PATH3/GIF-DMA aus EE-RAM oder VIF1/VU1),
-        dann die EE-Funktion, die das Paket baut, und deren Bedingung (Sichtbarkeitstest der
-        Sonne - Strahl gegen Kämpfer? ~41-Bilder-Takt passt zu einer Idle-Animation).
+      - **Ursache gefunden (17.10.): das Effekt-Lastbudget des Spiels.** Weg: Flare = PATH1 (VU1-
+        XGKICK, `T5_TBPWATCH=11200` loggt Pfad/Kick/VU1-Start je TEX0 auf diese Textur). Ohne
+        Flare: 12 statt 20 solcher Kicks, in drei Läufen (mit/ohne Mitschnitt) in denselben
+        Halbbildern. `T5_COVERFIELD=1` (EE-Funktionen je Vsync → `coverfield.txt`): 0x252688
+        (Flare-Element zeichnen), 0x252190, 0x2522E0, 0x22ED00 laufen genau in den Bildern mit
+        vollem Flare (1943/1943).
+        Effekt-Schleife `FUN_00252c70` → `FUN_00252b98` (pro Effekt): misst mit
+        `FUN_002ddc00` die verstrichene Bildzeit in % (Timer 1 `RCNT1` seit Bildanfang
+        `DAT_00154e80`, Takt 147 456 000 / fps) + Abschnittsdauer (`FUN_002ddcb0` Marken
+        0xd − 0xc); ab **95 %** werden die restlichen Effekte des Bildes nicht mehr gezeichnet.
+        Dazu Hysterese über `FUN_002dde30` (anderer Lastwert): ≥ 120 % → Effektbudget 0, < 100 %
+        → wieder 480 (`DAT_00153260/64/68`).
+        → Das Spiel drosselt selbst Effekte bei hoher Last. Bei uns zählt Timer 1 Host-Zeit
+        (Gerätezeit = Host-Zeit), die EE wartet dabei auf Worker/GS (Sync, Gegendruck) → misst
+        mehr Last als echte HW. Nächster Schritt: Messwert von `FUN_002ddc00` an der Stelle
+        loggen (welcher Anteil: eigene EE-Rechenzeit oder Warten auf Worker/GS?), dann
+        entscheiden (Nutzer), wie Timer 1 hier gerechnet werden soll.
 
 ## P4 Programme
 - [ ] B12 Devil Within, Tekken 1 Arcade History, Tekken 2 Arcade History, Tekken 3 Arcade History: Schwarzbild, hängt.

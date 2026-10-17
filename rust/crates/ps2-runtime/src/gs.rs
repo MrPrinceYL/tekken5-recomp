@@ -1519,6 +1519,14 @@ impl GsFront {
 
     /// A general register write from a GIF path.
     pub fn write_reg(&mut self, reg: u32, v: u64) {
+        // T5_TBPWATCH=<tbp>: log which path / VU1 program sets TEX0 to that texture base.
+        if reg & !1 == 6 && crate::diag::enabled("T5_TBPWATCH") {
+            static TBP: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+            if v & 0x3FFF == *TBP.get_or_init(|| std::env::var("T5_TBPWATCH").ok().and_then(|s| s.parse().ok()).unwrap_or(u64::MAX)) {
+                let p = crate::gif::CUR_PATH.load(R);
+                crate::diag::log(format!("[tbp] field {} vblank {} path {} kick {:#x} vu1 {:#x}", self.sent_fields, crate::VBLANKS.load(R), p >> 16, p & 0xFFFF, crate::gif::VU1_START.load(R)));
+            }
+        }
         match reg {
             0x60 => {
                 // SIGNAL: ID bits under the mask; interrupt unless IMR.SIGMSK.

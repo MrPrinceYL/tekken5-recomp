@@ -63,20 +63,34 @@ impl Gif {
     }
 }
 
+/// T5_TBPWATCH: the path feeding the GS right now (path << 16 | XGKICK address) and the start PC
+/// of the running VU1 program, for the TEX0 watch in `GsFront::write_reg`.
+pub static CUR_PATH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub static VU1_START: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn set_path(v: u32) {
+    if crate::diag::enabled("T5_TBPWATCH") {
+        CUR_PATH.store(v, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Feed PATH3 data (DMA channel 2).
 pub fn path3(m: &mut Machine, data: &[u128]) {
+    set_path(3 << 16);
     feed(&mut m.gs, &mut m.gif.paths[2], data);
     gs_irq(m);
 }
 
 /// The GIF FIFO (direct EE writes).
 pub fn fifo_write(m: &mut Machine, v: u128) {
+    set_path(4 << 16);
     feed(&mut m.gs, &mut m.gif.paths[2], &[v]);
     gs_irq(m);
 }
 
 /// PATH2 (VIF1 DIRECT) data.
 pub fn path2(m: &mut Machine, data: &[u128]) {
+    set_path(2 << 16);
     feed(&mut m.gs, &mut m.gif.paths[1], data);
     gs_irq(m);
 }
@@ -89,6 +103,7 @@ pub fn path1(m: &mut Machine, addr: u32) {
         let lo = tag as u64;
         crate::diag::count_with(|| format!("kick_n{}_flg{}_nreg{}_regs{:x}", lo & 0x7FFF, (lo >> 58) & 3, (lo >> 60) & 15, (tag >> 64) as u64 & 0xFFFF_FFFF));
     }
+    set_path(1 << 16 | (addr & 0x3FF));
     path1_run(m, addr);
     gs_irq(m);
 }

@@ -800,6 +800,9 @@ pub fn run(m: &mut Machine, n: usize, pc: u32) {
     if crate::diag::enabled("T5_VUTRACE") {
         diag::count_with(|| format!("vu{n}_start_{pc:#x}"));
     }
+    if n == 1 && crate::diag::enabled("T5_TBPWATCH") {
+        crate::gif::VU1_START.store(pc, std::sync::atomic::Ordering::Relaxed);
+    }
     let cap = n == 1 && crate::diag::enabled("T5_VUCAPTURE") && capture_start(m, pc);
     // T5_VUSHAPES=1: record block entry shapes (written to vu_dumps/shapes.txt by the summary).
     if n == 1 && crate::diag::enabled("T5_VUSHAPES") {

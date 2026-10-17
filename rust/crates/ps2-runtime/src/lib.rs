@@ -523,6 +523,15 @@ pub fn service(c: &mut Ctx) {
         m.field ^= 1;
         VBLANKS.fetch_add(1, Relaxed);
         diag::tl("EE vblank");
+        // T5_COVERFIELD=1: the EE functions entered in each field (coverfield.txt).
+        if diag::enabled("T5_COVERFIELD") {
+            ee_core::COVER_ON.store(true, Relaxed);
+            let hit: Vec<String> = ee_core::cover_take().iter().map(|a| format!("{a:X}")).collect();
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("coverfield.txt") {
+                use std::io::Write;
+                let _ = writeln!(f, "{} {}", VBLANKS.load(Relaxed), hit.join(" "));
+            }
+        }
         if let Some(t) = m.mtvu.as_mut() {
             let (pmode, smode2, dispfb, display, bgcolor) = m.gs.display_regs();
             t.send(mtvu::Cmd::Vsync { pmode, smode2, dispfb, display, bgcolor, field: m.field });
