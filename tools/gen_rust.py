@@ -213,6 +213,7 @@ class Gen:
         self.words = (0, 0)             # (own word, delay-slot word or own word)
         self.extern = set()
         self.uwide = set()              # unique temporaries that hold 16-byte values
+        self.usub = {}                  # unique offset inside a wider unique -> (base, byte)
 
     # ---- values ----
     def rd(self, v, want_wide=False):
@@ -230,7 +231,11 @@ class Gen:
                 o = reg_off(off)
                 e = f"c.r128(0x{o:x})" if wide else f"c.r(0x{o:x},{s})"
         elif k == "U":
-            if off in self.uwide and not wide:
+            if off in self.usub:
+                # Bytes of a wider temporary (multu's HI is `Uaf04:4` of the product `Uaf00:8`).
+                b, i = self.usub[off]
+                e = f"mask((u{b:x}>>{8 * i}) as u64,{s})"
+            elif off in self.uwide and not wide:
                 e = f"(u{off:x} as u64)"
             else:
                 e = f"u{off:x}"
@@ -261,6 +266,8 @@ class Gen:
             o = reg_off(off)
             return f"c.wr128(0x{o:x},{expr});" if dst_wide else f"c.wr(0x{o:x},{s},{expr});"
         if k == "U":
+            if off in self.usub:
+                raise ValueError(f"write to part of a temporary U{off:x}")
             if off in self.uwide and not dst_wide:
                 return f"u{off:x}=({expr}) as u128;"
             return f"u{off:x}={expr};"
@@ -389,12 +396,13 @@ class Gen:
             if m.group(1) == "U":
                 uses[int(m.group(2), 16)].add(int(m.group(3)))
         self.uwide = {u for u, ss in uses.items() if max(ss) > 8}
+        self.usub = {u: (b, u - b) for u in uses for b, ss in uses.items() if b < u < b + max(ss)}
         relative = [False]
         try:
             body = [self.op(o, i, own, relative) for i, o in enumerate(ops)]
         except Exception as e:
             raise ValueError(f"{self.variant} {self.cur:#010x} {self.asm}: {e}") from e
-        decl = "".join(f"let mut u{u:x}:{'u128' if u in self.uwide else 'u64'}=0;" for u in sorted(uses))
+        decl = "".join(f"let mut u{u:x}:{'u128' if u in self.uwide else 'u64'}=0;" for u in sorted(uses) if u not in self.usub)
         if relative[0]:
             arms = "".join(f"{i}=>{{{b}i={i + 1};}}" for i, b in enumerate(body))
             return f"{{{decl}let mut i:i64=0;loop{{match i{{{arms}_=>break}}}}}}"
