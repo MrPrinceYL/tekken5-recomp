@@ -88,7 +88,20 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         124 %), LOGIC 300/5 s. Nicht der Logik-Takt: nur der Wert, den Timer 1 liefert.
 
 ## P4 Programme
-- [ ] B12 Devil Within, Tekken 1 Arcade History, Tekken 2 Arcade History, Tekken 3 Arcade History: Schwarzbild, hängt.
+- [~] B12 Devil Within, Tekken 1 Arcade History, Tekken 2 Arcade History, Tekken 3 Arcade History: Schwarzbild, hängt.
+      - **Devil Within behoben (17.10.):** hing in libgcc `_fpmul_parts` (Soft-Float-Double):
+        `multu` lieferte HI = 0, weil Ghidra HI als Teil-Varnode `Uaf04:4` des Produkts
+        `Uaf00:8` schreibt und gen_rust.py dafür eine eigene 0-Variable anlegte. Betraf ALLE
+        7 EE-Programme (~5000 mult/multu/mult1/madd). Headless: Titelbild „PRESS START“.
+      - Arcade History: 1. owadpcm_driver (registriert RPC 0x07650001) und vdgcu_d liefen nie
+        durch die IOP-Pipeline → jetzt aus TK5DATA3-Eintrag 7 rekompiliert (Basis ab 0x100000).
+        2. tekken1/tekken2 haben gleichen Entry + crt0 → T2 lief mit T1-Code; Programm-ident
+        jetzt eindeutig.
+      - **Offen:** T1, T2 und T3 (alle headless geprüft) warten auf `sceSifBindRpc(0x80001300)` = Sonys Dbc_Manager (libpad2/
+        libdbc-Controllerkette: dbcman + sio2d, Gerätetreiber vdgcu_d spricht SIO2 direkt über
+        sio2man #51/#61/#62). Braucht HLE für dbcman (wie padman) bzw. SIO2-Pad-Emulation.
+        Menüweg headless: MODE SELECT 7× DOWN, CROSS, [RIGHT=T2], CROSS, CROSS (Controls),
+        CROSS (NO speichern), LEFT + CROSS.
 
 ## Selbst gefunden
 - [x] S0 **Fehlende EE-Funktionen** 0x2EE660 / 0x2EE6A0 / 0x2EE6E0: virtuelle Methoden (Aufruf per
