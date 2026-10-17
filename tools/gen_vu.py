@@ -3,6 +3,8 @@
 The game uploads its VU1 / VU0 micro programs at run time (VIF MPG). `t5-headless` with
 T5_VUDUMP=1 writes every distinct micro memory image it runs to run/vu_dumps/. This tool
 
+  --collect-elf VARIANT  the same statically from the program's .vutext section (all of
+                  its VU1 micro code, blocks and entry shapes; see collect_elf);
   --collect DIR   merges the instruction pairs of those images into sheets/vu_microcode.csv
                   (vu, upper, lower, disassembly), the source of truth for the translation;
   (default)       generates crates/t5-vu from the sheet: every pair becomes a specialised Rust
@@ -127,10 +129,34 @@ def mac_live(code, pc):
 
 
 def read_blocks():
+    """Rows by key. The key is recomputed from the content (as ps2_runtime::vu::block_key: VU
+    number + words, not the address): the same block loaded at another pc is one row, its entry
+    shapes merged; `pc` is where it was first seen."""
     if not BLOCKS.exists():
         return {}
+    rows = {}
     with open(BLOCKS, newline="") as f:
-        return {r["key"]: r for r in csv.DictReader(f)}
+        for r in csv.DictReader(f):
+            r["key"] = f"{block_key(int(r['vu']), r['pairs']):016x}"
+            old = rows.get(r["key"])
+            if old is None:
+                rows[r["key"]] = r
+                continue
+            have = [x for x in (old.get("shapes") or "").split("|") if x]
+            for sh in (r.get("shapes") or "").split("|"):
+                if sh and sh not in have:
+                    have.append(sh)
+            old["shapes"] = "|".join(have)
+    return rows
+
+
+def block_key(vu, pairs):
+    """Key of a block from its sheet text ("upper.lower ...")."""
+    words = []
+    for pr in pairs.split():
+        up, lo = (int(x, 16) for x in pr.split("."))
+        words += [lo, up]
+    return fnv([vu] + words)
 
 
 def collect_blocks(dump_dir):
@@ -154,7 +180,7 @@ def collect_blocks(dump_dir):
             if n is None:
                 continue
             words = list(struct.unpack_from(f"<{2 * n}I", code, pc * 8))
-            key = f"{fnv([pc] + words):016x}"
+            key = f"{fnv([int(img[2])] + words):016x}"
             if key in rows:
                 continue
             pairs = " ".join(f"{words[2 * i + 1]:08x}.{words[2 * i]:08x}" for i in range(n))
@@ -219,6 +245,115 @@ def collect(dump_dir):
     collect_blocks(dump_dir)
 
 
+def write_blocks(rows):
+    with open(BLOCKS, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=BCOLS)
+        w.writeheader()
+        for k in sorted(rows):
+            w.writerow({c: rows[k].get(c, "") for c in BCOLS})
+
+
+def collect_elf(variant):
+    """VU1 micro code straight from a program's `.vutext` section (no run needed): every pair
+    into sheets/vu_microcode.csv, every block (linear sweep + static branch targets) into
+    sheets/vu_blocks.csv, and entry shapes followed statically: a program starts with an empty
+    pipeline ("-" after the section start and after every E-bit block), each translated block
+    hands its exit shape to its fall-through and static branch successors. Blocks are keyed by
+    content, so where the game loads them later does not matter."""
+    sec = next(r for r in csv.DictReader(open(ROOT / "sheets" / "sections.csv", newline=""))
+               if r["variant"] == variant and r["name"] == ".vutext")
+    start, end = int(sec["start"], 16), int(sec["end"], 16) + 1
+    elf = (ROOT.parent / "Tekken5" / "extracted" / "elf" / f"{variant}.elf").read_bytes()
+    phoff, = struct.unpack_from("<I", elf, 0x1C)
+    phnum, = struct.unpack_from("<H", elf, 0x2C)
+    code = None
+    for i in range(phnum):
+        _, off, va, _, fsz, _ = struct.unpack_from("<6I", elf, phoff + i * 32)
+        if va <= start and end <= va + fsz:
+            code = elf[off + start - va:off + end - va]
+    code = code[:len(code) // 8 * 8]
+    n = len(code) // 8
+    # Pairs.
+    rows = read_sheet()
+    before = len(rows)
+    for pc in range(n):
+        lo, up = struct.unpack_from("<II", code, pc * 8)
+        key = ("1", f"{up:08x}", f"{lo:08x}")
+        if key not in rows:
+            rows[key] = {"vu": "1", "upper": key[1], "lower": key[2], "disasm": vudis.pair(code, pc)[5:].strip()}
+    with open(SHEET, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=COLS)
+        w.writeheader()
+        for k in sorted(rows):
+            w.writerow(rows[k])
+    print(f"{variant} .vutext: {n} pairs, {len(rows) - before} new in {SHEET.name}")
+    # Blocks: start of the section, after every block, static branch targets.
+    blocks = {}
+    entry = set()
+    work = [0]
+    while work:
+        pc = work.pop()
+        if pc in blocks or not 0 <= pc < n:
+            continue
+        ln = block_len(code, pc)
+        if ln is None:
+            continue
+        blocks[pc] = ln
+        lo, up = pair_at(code, pc + ln - 2)
+        work.append(pc + ln)
+        if up & 0x40000000:
+            entry.add(pc + ln)
+        if is_branch(lo, up) and (lo >> 25) not in (0x24, 0x25):
+            work.append(pc + ln - 1 + (((lo & 0x7FF) ^ 0x400) - 0x400))
+    entry.add(0)
+    brows = read_blocks()
+    bbefore = len(brows)
+    info = {}
+    for pc, ln in blocks.items():
+        words = list(struct.unpack_from(f"<{2 * ln}I", code, pc * 8))
+        key = f"{fnv([1] + words):016x}"
+        prs = [(words[2 * i + 1], words[2 * i]) for i in range(ln)]
+        live = "".join("1" if mac_live(code, pc + i) else "0" for i in range(ln))
+        if key not in brows:
+            brows[key] = {"vu": "1", "pc": f"{pc:x}", "len": ln, "key": key,
+                          "pairs": " ".join(f"{u:08x}.{l:08x}" for u, l in prs), "mac_live": live, "shapes": ""}
+        info[pc] = (key, prs, live)
+    # Entry shapes, followed to a fixed point (at most MAX_SHAPES per block).
+    MAX_SHAPES = 4
+    seen = set()
+    work = [(pc, "") for pc in entry if pc in info]
+    for pc, (key, _, _) in info.items():
+        work += [(pc, "" if sh == "-" else sh) for sh in (brows[key].get("shapes") or "").split("|") if sh]
+    added = 0
+    while work:
+        pc, sh = work.pop()
+        if (pc, sh) in seen or pc not in info:
+            continue
+        key, prs, live = info[pc]
+        have = [x for x in (brows[key].get("shapes") or "").split("|") if x]
+        mark = sh if sh else "-"
+        if mark not in have:
+            if len(have) >= MAX_SHAPES:
+                continue
+            have.append(mark)
+            brows[key]["shapes"] = "|".join(have)
+            added += 1
+        seen.add((pc, sh))
+        out = vuc.exit_shape(pc, prs, live, sh)
+        if out is None:
+            continue
+        ln = len(prs)
+        up, lo = prs[-2]
+        if up & 0x40000000:
+            continue
+        if not (is_branch(lo, up) and (lo >> 25) in (0x20, 0x21, 0x24, 0x25)):
+            work.append((pc + ln, out))
+        if is_branch(lo, up) and (lo >> 25) not in (0x24, 0x25):
+            work.append((pc + ln - 1 + (((lo & 0x7FF) ^ 0x400) - 0x400), out))
+    write_blocks(brows)
+    print(f"{len(blocks)} blocks in .vutext, {len(brows) - bbefore} new in {BLOCKS.name}, {added} entry shapes added")
+
+
 def write_if_changed(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
     # CRLF on every platform (as written on Windows), so Linux and Windows output is identical.
@@ -267,8 +402,9 @@ def generate():
             # whose reference parameters do not alias (registers stay in host registers).
             po.append("#[inline(never)]")
             po.append(f"fn b_{key}(r: &mut Run) -> bool {{")
-            po.append(f"    if !blk_enter(r, 0x{pc:x}, {n}) {{ return blk_one(r); }}")
+            po.append(f"    if !blk_enter(r, {n}) {{ return blk_one(r); }}")
             po.append("    let (regs, data, p, c, mp) = blk_parts(r);")
+            po.append("    let pc0 = c.pc;")
             # Statically translated variants per entry shape (tools/vuc.py), else pair by pair.
             variants = []
             if vu == 1 and b.get("shapes"):
@@ -282,29 +418,31 @@ def generate():
                 po.append("    match key {")
                 for j, (sk, _) in enumerate(variants):
                     po.append(f"        0x{sk:016x} => s_{key}_{j}(regs, data, p, c, mp),")
-                po.append(f"        _ => {{ p.key_ok = false; k_{key}(regs, data, p, c, mp) }}")
+                po.append(f"        _ => {{ p.key_ok = false; k_{key}(pc0, regs, data, p, c, mp) }}")
                 po.append("    }")
             else:
                 po.append("    p.key_ok = false;")
-                po.append(f"    k_{key}(regs, data, p, c, mp)")
+                po.append(f"    k_{key}(pc0, regs, data, p, c, mp)")
             po.append("}")
             for _, src in variants:
                 po.append(src)
             po.append("#[inline(never)]")
-            po.append(f"fn k_{key}(regs: &mut VuRegs, data: *mut u8, p: &mut Pipe, c: &mut Ctl, mp: *mut Machine) -> bool {{")
+            po.append(f"fn k_{key}(pc0: u32, regs: &mut VuRegs, data: *mut u8, p: &mut Pipe, c: &mut Ctl, mp: *mut Machine) -> bool {{")
+            icount = 0x800 if vu == 1 else 0x200
             for i, ((up, lo), live) in enumerate(zip(prs, b["mac_live"])):
                 ctrl = i >= n - 2
                 vib = i < 2 or wr[i] or (i >= 1 and wr[i - 1]) or (i >= 2 and wr[i - 2]) or is_branch(lo, up)
                 args = (f"0x{lo:08x}, 0x{up:08x}, {'true' if live == '1' else 'false'}, "
-                        f"{'true' if ctrl else 'false'}, {'true' if vib else 'false'}, 0x{pc + i:x}, {vu}")
-                call = f"pair_lean::<{args}>(regs, data, p, c, mp)"
+                        f"{'true' if ctrl else 'false'}, {'true' if vib else 'false'}, {vu}")
+                at = f"(pc0 + {i}) % {icount}"
+                call = f"pair_lean::<{args}>({at}, regs, data, p, c, mp)"
                 if not ctrl:
                     po.append(f"    {call};")
                 else:
                     if i == n - 2:
-                        po.append(f"    c.pc = 0x{pc + i:x};")
+                        po.append(f"    c.pc = {at};")
                     else:
-                        po.append(f"    if c.pc != 0x{pc + i:x} {{ return false; }}")
+                        po.append(f"    if c.pc != {at} {{ return false; }}")
                     po.append(f"    if {call} {{ return true; }}")
             po.append("    false")
             po.append("}")
@@ -333,6 +471,8 @@ def generate():
 if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "--collect":
         collect(sys.argv[2])
+    elif len(sys.argv) > 2 and sys.argv[1] == "--collect-elf":
+        collect_elf(sys.argv[2])
     elif len(sys.argv) > 2 and sys.argv[1] == "--collect-shapes":
         collect_shapes(sys.argv[2])
     else:

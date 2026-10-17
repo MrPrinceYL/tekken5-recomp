@@ -62,26 +62,28 @@ pub fn block_len(code: &[u8], pc: usize) -> Option<usize> {
     None
 }
 
-/// A block's key: FNV-1a over its start pc and instruction words (tools/gen_vu.py computes the
-/// same).
-pub fn block_key(code: &[u8], pc: usize, len: usize) -> u64 {
+/// A block's key: FNV-1a over the VU number and its instruction words, not its address: the game
+/// loads the same micro code at different places (Devil Within packs its overlays behind the
+/// resident program), the translated block takes its pc at run time (tools/gen_vu.py computes
+/// the same key).
+pub fn block_key(code: &[u8], n: usize, pc: usize, len: usize) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     let mut mix = |w: u32| {
         for b in w.to_le_bytes() {
             h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
         }
     };
-    mix(pc as u32);
+    mix(n as u32);
     for w in code[pc * 8..(pc + len) * 8].chunks_exact(4) {
         mix(u32::from_le_bytes(w.try_into().unwrap()));
     }
     h
 }
 
-fn resolve_block(code: &[u8], pc: usize) -> Option<PairFn> {
+fn resolve_block(code: &[u8], n: usize, pc: usize) -> Option<PairFn> {
     let t = BLOCK_TABLE.get()?;
     let len = block_len(code, pc)?;
-    let key = block_key(code, pc, len);
+    let key = block_key(code, n, pc, len);
     t.binary_search_by_key(&key, |e| e.0).ok().map(|i| t[i].1)
 }
 
@@ -911,7 +913,7 @@ fn run_inner(m: &mut Machine, n: usize, pc: u32) {
                 let flags = vu.readers.0 || (vu.readers.1 && mac_live(&vu.code, pc));
                 // A translated block (it carries per-pair flag liveness, which assumes no Status
                 // readers), else the single pair.
-                let block = if vu.readers.0 { None } else { resolve_block(&vu.code, pc) };
+                let block = if vu.readers.0 { None } else { resolve_block(&vu.code, n, pc) };
                 if block.is_none() && crate::diag::enabled("T5_VUDUMP") {
                     log_block_start(&vu.code, n, pc);
                 }
@@ -935,19 +937,20 @@ fn run_inner(m: &mut Machine, n: usize, pc: u32) {
     regs.vi[VI_TPC] = run.ctl.pc;
 }
 
-/// Start of a translated block of `n` pairs at `pc`: false when the block cannot run straight
-/// (a branch or E bit is still pending from before, or another pc): the caller then runs one
-/// pair (`blk_one`).
+/// Start of a translated block of `n` pairs at the current pc (where `run_inner` resolved it):
+/// false when the block cannot run straight (a branch or E bit is still pending from before):
+/// the caller then runs one pair (`blk_one`).
 #[inline(always)]
-pub fn blk_enter(r: &mut Run, pc: u32, n: u64) -> bool {
-    if r.ctl.branch_to.is_some() || r.ctl.end_after || r.ctl.pc != pc || r.tracing {
+pub fn blk_enter(r: &mut Run, n: u64) -> bool {
+    let pc = r.ctl.pc;
+    if r.ctl.branch_to.is_some() || r.ctl.end_after || r.tracing {
         return false;
     }
     if SHAPES_ON.load(std::sync::atomic::Ordering::Relaxed) {
         let regs = unsafe { &mut *r.regs };
         r.p.canon(regs);
         let vu = unsafe { &*r.vu };
-        let key = block_len(&vu.code, pc as usize).map(|len| block_key(&vu.code, pc as usize, len)).unwrap_or(0);
+        let key = block_len(&vu.code, pc as usize).map(|len| block_key(&vu.code, r.n, pc as usize, len)).unwrap_or(0);
         let sh = format!("{key:016x} {:016x} {}", r.p.shape_key(), r.p.shape());
         SHAPES.lock().unwrap().get_or_insert_with(Default::default).entry((pc, sh)).and_modify(|c: &mut u64| *c += 1).or_insert(1);
     }
@@ -1155,12 +1158,13 @@ fn pair_body(r: &mut Run, lower: u32, upw: u32, flags: bool) -> bool {
 }
 
 /// `pair_body` for translated blocks (crate t5-vu): the generator resolves per pair what
-/// `pair_body` decides at run time. No tracing; steps are counted per block (`blk_enter`); `PC`
-/// is the pair's address; only `CTRL` pairs (a branch / E bit and its delay slot) run the
+/// `pair_body` decides at run time. No tracing; steps are counted per block (`blk_enter`); `pc`
+/// is the pair's address (block start + offset, at run time: the code is relocatable); only `CTRL` pairs (a branch / E bit and its delay slot) run the
 /// control flow; only `VIB` pairs (near a VI-backup writer or a branch, and the first two of a
 /// block) keep the VI backup.
 #[inline(always)]
-pub fn pair_lean<const L: u32, const U: u32, const FLAGS: bool, const CTRL: bool, const VIB: bool, const PC: u32, const VU: usize>(
+pub fn pair_lean<const L: u32, const U: u32, const FLAGS: bool, const CTRL: bool, const VIB: bool, const VU: usize>(
+    pc: u32,
     regs: &mut VuRegs,
     data: *mut u8,
     p: &mut Pipe,
@@ -1172,7 +1176,6 @@ pub fn pair_lean<const L: u32, const U: u32, const FLAGS: bool, const CTRL: bool
     // Micro memory sizes: VU0 4 KiB code / data, VU1 16 KiB.
     let icount: u32 = if VU == 1 { 0x800 } else { 0x200 };
     let qmask: u32 = if VU == 1 { 0x3FF } else { 0xFF };
-    let pc = PC;
     p.cycle += 1;
     let before = p.cycle - 1;
     let ibit = upw & 0x8000_0000 != 0;

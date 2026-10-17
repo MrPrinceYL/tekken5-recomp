@@ -137,6 +137,23 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         Headless-Lauf (nur der Anfang) nie geladen hat. Nächster Schritt: `T5_VUDUMP=1` im
         Fenster durch dieselben Bereiche → `gen_vu.py --collect rust/vu_dumps` → `gen_vu.py`.
         (Achtung: eine erste Messung war mit noch gesetztem `T5_VUSHAPES` verfälscht.)
+      - `T5_VUDUMP` im Fenster lief mit ~2 fps (Nutzer konnte nicht alles abdecken): +654
+        Paare, +971 Blöcke. Dabei gefunden: **Devil Within lädt dieselben VU1-Programme an
+        wechselnde Adressen** (Overlays hinter dem residenten Programm ab ~0x4FE, je Bild anders
+        gepackt). Der Blockschlüssel enthielt die pc → jede neue Lage = unübersetzter Block,
+        Paar für Paar (656 Blöcke mit gleichem Inhalt an bis zu 32 Adressen).
+      - **Fix (17.10.): Blöcke adressunabhängig** (microVU-Prinzip): Schlüssel = FNV über
+        VU-Nummer + Wörter (`vu::block_key`, `gen_vu.py block_key`), übersetzte Blöcke nehmen
+        die pc zur Laufzeit (`pair_lean(pc, …)`, `vuc.py Block.at`). Sheet-Zeilen gleichen
+        Inhalts zusammengeführt (5022 → 4233).
+      - **VU1-Code statisch aus dem Programm:** `gen_vu.py --collect-elf devil` liest die
+        Sektion `.vutext` (0x28E1F0–0x2A979F, 14 006 Paare): alle Paare (+1346), Blöcke per
+        linearem Durchlauf + statischen Sprungzielen (1211, +542), Eintritts-Shapes statisch
+        verfolgt ("-" am Sektionsanfang und nach jedem E-Bit-Block, Ausgangs-Shape → Nachfolger,
+        max. 4 je Block; +207). Laufzeit-Einsprünge „mitten im Block“ in alten Dumps waren nur
+        Folge des Paar-für-Paar-Laufs.
+      - Prüfung: vu-bench Moonlit 3000/3000 bitgenau (3,3–3,6 ns/Paar auf diesem Windows-PC).
+        Nutzertest Devil Within offen.
 
 ## Selbst gefunden
 - [x] S0 **Fehlende EE-Funktionen** 0x2EE660 / 0x2EE6A0 / 0x2EE6E0: virtuelle Methoden (Aufruf per

@@ -428,10 +428,9 @@ class Block:
         imm15 = (w & 0x7FF) | ((w >> 21) & 0xF) << 11
         fsf, ftf = (w >> 21) & 3, (w >> 23) & 3
         op = w >> 25
-        pc = self.pc + i
 
         def tgt(off):
-            return (pc + 1 + off) % ICOUNT
+            return self.at(i + 1 + off)
 
         def addr(reg, off):
             return f"({self.vi16(reg)} as i32 + {off}) as u32"
@@ -495,22 +494,22 @@ class Block:
         if op == 0x1C:
             return pend_vi(it, "vclip & 0xFFF"), None
         if op == 0x20:
-            return None, ("true", str(tgt(imm11)))
+            return None, ("true", tgt(imm11))
         if op == 0x21:
-            return pend_vi(it, str((pc + 2) % ICOUNT)), ("true", str(tgt(imm11)))
+            return pend_vi(it, self.at(i + 2)), ("true", tgt(imm11))
         if op == 0x24:
             return None, ("true", f"{self.vi16(is_)} % {ICOUNT}")
         if op == 0x25:
-            p = pend_vi(it, str((pc + 2) % ICOUNT))
+            p = pend_vi(it, self.at(i + 2))
             return p, ("true", f"{self.vi16(is_)} % {ICOUNT}")
         if op in (0x28, 0x29):
             a, b = self.branch_vi(it), self.branch_vi(is_)
             c = f"{a} == {b}" if op == 0x28 else f"{a} != {b}"
-            return None, (c, str(tgt(imm11)))
+            return None, (c, tgt(imm11))
         if 0x2C <= op <= 0x2F:
             a = f"({self.branch_vi(is_)} as u16 as i16)"
             c = {0x2C: f"{a} < 0", 0x2D: f"{a} > 0", 0x2E: f"{a} <= 0", 0x2F: f"{a} >= 0"}[op]
-            return None, (c, str(tgt(imm11)))
+            return None, (c, tgt(imm11))
         if op != 0x40:
             raise Unsupported(f"lower op {w:#010x}")
         funct = w & 0x3F
@@ -711,7 +710,7 @@ class Block:
         flags = self.live[i] == "1"
         ibit = bool(up & 0x80000000)
         ebit = bool(up & 0x40000000)
-        self.e(f"// {self.pc + i:#x}: {up:08x} {lo:08x}{' flags' if flags else ''}")
+        self.e(f"// +{i}: {up:08x} {lo:08x}{' flags' if flags else ''}")
         self.cycle += 1
         before = self.cycle - 1
         ui = upper_info(up)
@@ -800,7 +799,9 @@ class Block:
         # Pipe::canon here, so the next block's entry key is known now.
         while self.fmac and self.cycle - self.fmac[0]["start"] >= 4:
             self.apply_fmac(self.fmac.pop(0))
-        key = shape_key(self.exit_shape())
+        # The next block's entry shape (gen_vu.py --collect-elf follows it statically).
+        self.exit = self.exit_shape()
+        key = shape_key(self.exit)
         writes = [(t, r, m) for (t, r, m) in self.wq if t > self.cycle]
         w = ", ".join(f"({t}, {r}, {m})" for t, r, m in writes)
         fm = ", ".join(f"({e['start']}, {e['flagreg']:#x}, {e['val']}.0, {e['val']}.1, {e['val']}.2)" for e in self.fmac)
@@ -811,6 +812,10 @@ class Block:
         self.store_regs()
         self.e(f"regs.vi[{VI_MAC}] = vmac; regs.vi[{VI_STATUS}] = vst; regs.vi[{VI_CLIP}] = vclip;")
         self.e(f"p.s_out(base, {self.cycle}, (pmac, pst, pclip), &[{w}], &[{fm}], {fdiv}, {efu}, &[{ialu}], {vib}, {key:#x});")
+
+    def at(self, k):
+        """Rust expression: the address k pairs after the block start."""
+        return f"((pc0 + {k % ICOUNT}) % {ICOUNT})"
 
     def compile(self, fname):
         n = len(self.pairs)
@@ -827,7 +832,7 @@ class Block:
             tk, eb = self.pair(i)
             if i == n - 2:
                 taken, ebit = tk, eb
-        nxt = (self.pc + n) % ICOUNT
+        nxt = self.at(n)
         self.exit_state()
         if taken is None:
             self.e(f"c.pc = {nxt};")
@@ -841,7 +846,9 @@ class Block:
             self.e("false")
         head = [f"#[inline(never)]",
                 f"fn {fname}(regs: &mut VuRegs, data: *mut u8, p: &mut Pipe, c: &mut Ctl, mp: *mut Machine) -> bool {{",
-                "    let _ = (data, mp);"]
+                "    let _ = (data, mp);",
+                # The block's address at run time (the same code is loaded at different pcs).
+                "    let pc0 = c.pc;"]
         return "\n".join(head + self.out + ["}"])
 
 
@@ -851,3 +858,14 @@ def compile_block(fname, pc, pairs, live, shape):
         return Block(pc, pairs, live, shape).compile(fname)
     except Unsupported:
         return None
+
+
+def exit_shape(pc, pairs, live, shape):
+    """The shape a block leaves for its successor when entered with `shape`; None if the block
+    is not translatable."""
+    b = Block(pc, pairs, live, shape)
+    try:
+        b.compile("_")
+    except Unsupported:
+        return None
+    return b.exit
