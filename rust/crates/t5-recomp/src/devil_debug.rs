@@ -232,10 +232,7 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
             .to_string(),
         // MAP VIEWER 0x108D60, update 0x108DC8: KREIS loads the map if it exists (0x125F60) into
         // EVENT_SAMPLE_MODE.
-        0x0010_8DC8 => format!(
-            "MAP VIEWER\nKarte {}\n--\nHoch/Runter: Karte   KREIS (C): laden (nur vorhandene Karten)",
-            s(0x34)
-        ),
+        0x0010_8DC8 => map_viewer(m, s(0x34)),
         // EVENT_SAMPLE_MODE 0x106728 (map loaded from MAP VIEWER / SOUND 3D TEST), 0x107F30 /
         // 0x108120: free camera.
         0x0010_7F30 => "KARTE (EVENT_SAMPLE_MODE, freie Kamera)\n--\n\
@@ -273,6 +270,96 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
         ),
         _ => return None,
     })
+}
+
+/// The developer warp list `area/mpl.txt` as parsed by 0x125D38: count at 0x41B55C, table at
+/// *0x41B558, 0x50 bytes per entry (+0 area, +0xE number, +0x10 point, +0x30 label in
+/// Shift-JIS).
+const MPL_TABLE: u32 = 0x0041_B558;
+const MPL_COUNT: u32 = 0x0041_B55C;
+/// Areas with files in TK5DATA2 (the program's directory 0x362900); the other entries of the
+/// list (bgtest, effect, kondoh, matty, mine, szk) name test maps whose data is not on the disc.
+const AREAS_ON_DISC: &[&str] = &["lab_A", "lab_B", "egy_A", "blu_A", "blu_B", "chr", "makino"];
+
+/// German for the Japanese words of the warp list labels (Shift-JIS, longest first).
+const MPL_WORDS: &[(&[u8], &str)] = &[
+    (b"\x83\x47\x83\x74\x83\x46\x83\x4e\x83\x67\x8c\x9f\x8f\xd8\x97\x70\x83\x7d\x83\x62\x83\x76\x83\x66\x81\x5b\x83\x5e", "Effekt-Pruefkarte"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x83\x82\x83\x93\x83\x58\x83\x5e\x81\x5b", "Figurentest Monster"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x83\x66\x83\x55\x81\x5b\x83\x67", "Figurentest Desert"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x93\x53\x8c\x9d", "Figurentest Tekken"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x4e\x83\x5e\x81\x5b\x8c\x9f\x8f\xd8\x97\x70", "Figuren-Pruefraum"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x4e\x83\x5e\x81\x5b\x83\x65\x83\x58\x83\x67", "Figurentest"),
+    (b"\x91\x93\x82\xa2\x88\xe2\x90\xd5\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster Blaue Ruinen "),
+    (b"\x83\x47\x83\x57\x83\x76\x83\x67\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster Aegypten "),
+    (b"\x8c\xa4\x8b\x86\x8e\xba\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster Labor "),
+    (b"\x97\xd1\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster WALD (kein Gebiet im Spiel) "),
+    (b"\x97\x86\x90\xf9\x8a\x4b\x92\x69\x83\x65\x83\x58\x83\x67", "Wendeltreppen-Test "),
+    (b"\x81\x40\x83\x5a\x81\x5b\x83\x75\x95\x94\x89\xae", " Speicherraum"),
+    (b"\x96\x71\x96\xec\x83\x65\x83\x58\x83\x67", "Makino-Test "),
+    (b"\x95\x89\x89\xd7\x83\x65\x83\x58\x83\x67", "Lasttest "),
+    (b"\x81\x40\x91\x93\x82\xa2\x88\xe2\x90\xd5", " Blaue Ruinen "),
+    (b"\x8e\x52\x93\xe0\x83\x65\x83\x58\x83\x67", "Yamauchi-Test"),
+    (b"\x95\x89\x89\xd7\x8c\x9f\x8f\xd8\x97\x70", "Lastpruefung"),
+    (b"\x83\x65\x83\x58\x83\x67\x95\x94\x89\xae", "Testraum "),
+    (b"\x81\x40\x83\x47\x83\x57\x83\x76\x83\x67", " Aegypten "),
+    (b"\x81\x40\x8c\xa4\x8b\x86\x8e\xba", " Labor "),
+    (b"\x81\x40\x83\x7b\x83\x58", " BOSS"),
+    (b"\x97\x86\x90\xf9", " Spirale"),
+    (b"\x8e\x52\x93\xe0", "Yamauchi"),
+    (b"\x83\x65\x83\x58\x83\x67", "Test"),
+    (b"\x81\x69", "("),
+    (b"\x81\x6a", ")"),
+    (b"\x81\xa5", ""),
+    (b"\x81\x40", " "),
+    (b"\x82\x50", "1"),
+    (b"\x82\x51", "2"),
+];
+
+fn mpl_label(m: &Machine, a: u32) -> String {
+    let b: Vec<u8> = (0..0x20).map(|i| ram_read(m, a + i, 1) as u8).take_while(|&b| b != 0).collect();
+    let mut out = String::new();
+    let mut i = 0;
+    'next: while i < b.len() {
+        if b[i] < 0x80 {
+            out.push(b[i] as char);
+            i += 1;
+            continue;
+        }
+        for (jp, de) in MPL_WORDS {
+            if b[i..].starts_with(jp) {
+                out.push_str(de);
+                i += jp.len();
+                continue 'next;
+            }
+        }
+        out.push('?');
+        i += 2;
+    }
+    out
+}
+
+/// MAP VIEWER: the warp list around the cursor, with the labels in German and the test maps
+/// whose data is missing marked.
+fn map_viewer(m: &Machine, cur: i32) -> String {
+    let table = word(m, MPL_TABLE);
+    let count = int(m, MPL_COUNT);
+    let mut out = format!("MAP VIEWER (Warp-Liste area/mpl.txt, {count} Eintraege)\n");
+    if table == 0 || count <= 0 {
+        out.push_str("Liste nicht geladen\n");
+    }
+    for i in (cur - 6).max(0)..(cur + 7).min(count) {
+        let e = table + i as u32 * 0x50;
+        let area = cstr(m, e);
+        let mark = if i == cur { "> " } else { "  " };
+        let missing = if AREAS_ON_DISC.contains(&area.as_str()) { "" } else { "  [Daten fehlen]" };
+        out.push_str(&format!(
+            "{mark}{i:2} {area} {} - {}{missing}\n",
+            ram_read(m, e + 0xE, 2) as u16,
+            mpl_label(m, e + 0x30).trim()
+        ));
+    }
+    out.push_str("--\nHoch/Runter: Karte   KREIS (C): laden\n[Daten fehlen] = Testkarte ohne Dateien auf der Disc, nicht laden");
+    out
 }
 
 fn overlay(m: &Machine) -> String {

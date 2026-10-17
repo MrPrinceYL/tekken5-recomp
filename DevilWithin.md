@@ -191,10 +191,59 @@ Auffällig:
 - Musik `stream/`: BGM_etc01/02, gameover, interlude, labo01, menu, monu, ogre02, rate, robo,
   site01, staffroll (+ stream.list) – noch nicht geprüft, ob alle im Spiel laufen.
 
-**Offen:** Wo `tk5data2.bin` auf der Disc liegt. Auf der Disc gibt es keine TK5DATA2.BIN; an den
-Verzeichnis-Offsets liegen in TK5DATA0/1/5 keine Klartextdaten (komprimiert/verschlüsselt oder
-andere Basis). Die Laufzeit meldete im Spiel nur `cdvd: search \TK5DATA3.BIN`. Erst danach
-lassen sich Inhalte (Texte, Testraum, Testfiguren) lesen bzw. im Spiel laden.
+**Archiv gefunden (18.10.):** `cd:tk5data2.bin` = **TK5DATA2.BIN** (LBA 2059640, 244 426 640 Byte,
+letzte Datei der Disc; Pfad: EE 0x20E4C0 → IOP NU_File_Manager 0x0B2A68 macht daraus
+`\TK5DATA2.BIN;1` → sceCdSearchFile). Inhalt **unverschlüsselt und unkomprimiert**, Offsets aus
+dem Verzeichnis gelten ab Dateianfang. (Meine frühere Aussage „verschlüsselt“ war falsch: ich
+hatte in TK5DATA0/1/5 gesucht.) Entpacken: `tools/dw_extract.py <iso> <extracted>` →
+`extracted/tk5data2/` (nicht in Git) + `sheets/dw_files.csv`.
+
+## 3a. Bosse, Ogres, gestrichene Inhalte (aus TK5DATA2)
+
+**Boss-Zuordnung** (Bossräume `area/<gebiet>/<gebiet>_005.txt`, Entwickler-Warpliste
+`area/mpl.txt`, Shift-JIS):
+
+| Gebiet | mpl-Name | Bossraum | Boss |
+|---|---|---|---|
+| lab_A | 1 研究室A (Labor A) | 1-5 ボス | boss1 (`kmb1`: Maschinengewehr, Schrotflinte, Sprungschuss) |
+| lab_B | 2 研究室B (Labor B) | 2-5 ボス | boss2 (Bewegungen aus Heihachi/Kazuya-Sätzen: `hei`, `he`, `kz`) |
+| egy_A | 3 エジプトA (Ägypten A) | 3-5 ボス | boss3 = **Ogre** (Soundset `c_03_ogre`) |
+| blu_A | 4 蒼い遺跡A (Blaue Ruinen A) | 4-5 ボス | **kein Boss**: nur sechs normale Monstertypen |
+| blu_B | 5 蒼い遺跡B (Blaue Ruinen B) | 5-5 ボス | boss3 (Ogre) und danach boss5 = **True Ogre** (Soundset `c_05_ogre` mit `METAMO` = Verwandlung, `bhb_ai_boss5_lv1/lv2`, `bhb_mo_boss5_start2`) |
+
+- **Fehlender Boss 4:** Die Entwickler-Warpliste nennt für jedes der fünf Gebiete einen
+  Bossraum („x-5 ボス“). In Gebiet 4 (blu_A) steht dort keine Boss-KI, kein `init_obj_boss4`, keine
+  Liste `chr_boss4`, kein Modellplatz in `common/char_model_all.txt`. Die Nummerierung 1, 2, 3, 5
+  und der leere Bossraum in Gebiet 4 sprechen für einen **gestrichenen vierten Boss**. Daten davon
+  sind auf der Disc nicht vorhanden, er lässt sich also nicht wiederherstellen.
+- **Ogres:** Es gibt nur **zwei** Ogre-Kämpfe (Ogre = boss3, True Ogre = boss5). Der Code lädt nur
+  `common/ogre3.shd` und `ogre5.shd` (0x113A18, mit `simple.shd`, `tkchr.shd`). `ogre2.nud/.shd`,
+  `ogre3.nud`, `ogre5.nud` und `ogre_shd.shd` lädt weder Code noch eine Liste → **Überbleibsel**.
+  `ogre2` passt zur Bossnummer 2, liegt aber neben einem boss2 mit Heihachi/Kazuya-Bewegungen;
+  dass boss2 früher ein Ogre war, ist möglich, aber nicht belegt. Die Musik `BGM_ogre02`
+  läuft in blu_B.
+- **boss2 A–D:** vier Listen, die sich nur im Modell unterscheiden (`nut_chr_boss2_A..D`), belegen
+  die Modellplätze 1–4 in `char_model_all.txt`; kein Gebiet lädt sie direkt.
+- **Testfiguren testchr1–3:** Bewegungslisten vorhanden (testchr1 = boss2 + `shoryu01/24`,
+  `ozhe_power`, `nahe_*`; testchr2 = boss2 + Devil-Jin-Flügel `djin_newhane`), Modellplätze 5, 6, 15.
+  Ihre Modelle (`obj_obj_testchr*`, `nut_chr_testchr*`) stehen in **keiner** Datei → nicht ladbar.
+- **Test-Items:** `common/item.txt` (`itm_testA`), `test/gimmick_item.txt` (Gold-/Lebens-Items
+  „luminous“ S/M/L).
+- **Abspann:** `staffroll2.txt` lädt `asb/ast_staffroll_test.dat` (Test-Abspann).
+- `script/DEBUG/*/readme.txt`: „script data for ai“ usw.
+
+**Entwickler-Warpliste `area/mpl.txt` (81 Einträge, Index = MAP VIEWER):** 0–48 die fünf Gebiete
+(je Raum, Bossraum, Speicherraum), dazu Testkarten: `bgtest` 1–4 Musterkarten von Yamauchi
+(Labor, Ägypten, Blaue Ruinen und **„林サンプル“ = Wald**, ein Gebiet, das es im Spiel nicht gibt),
+`chr` 1–5 (Figuren-Prüfraum, Figurentest, Figurentest Tekken / Monster / Desert), `effect`
+(Effekt-Prüfkarte), `kondoh` 1–2, `makino` 1, `matty` 1–6, `mine` 1–2, `szk` 1–11 (test_egy,
+test_blu, test_gim, 100x100, test_unit, test_1m, Lastprüfung, Wendeltreppen-Tests …).
+Dateien gibt es nur für `chr` und `makino` (plus die fünf Gebiete); die übrigen Testkarten
+(darunter der Wald) fehlen auf der Disc.
+
+**Im Spiel testen:** `T5_DW_DEBUG=dev` → MAKINO MENU → MAP VIEWER. Das Overlay zeigt die Warpliste
+mit deutschen Namen und markiert Karten ohne Daten mit `[Daten fehlen]`. Ladbar sind die Gebiete,
+die `chr`-Testräume (Index 53–57) und der Makino-Testraum (61).
 
 ## 4. Noch nicht untersucht
 - Inhalte der Textdateien (Dialoge, ungenutzte Texte) – hängt am Archiv (Abschnitt 3).
