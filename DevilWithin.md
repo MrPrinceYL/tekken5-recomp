@@ -106,8 +106,12 @@ die Menülogik nicht:
 0 MAKINO MENU, 1 SHUJI, 2 HASHI, 3 MATTY, 4 KONDOH, 5 CHARA VIEW, 6 MODEL VIEW, 7 STREAM TEST,
 8 GAME LOAD START, 9 TITLE(Debug), 10 TITLE(Release), 11 BASE_PAK RELOAD, 12 MPL RELOAD,
 13 GAME MODE.
-Sichtbar machen ginge nur mit einer eigenen Anzeige außerhalb des Spielcodes (z. B. Bevy-Overlay,
-das Tabelle +0x38 und Auswahl +0x40 aus dem Gast-RAM liest) – Entscheidung des Nutzers offen.
+**Overlay (Nutzerwunsch 17.10.):** `devil_debug::menu_text` liest bei jedem Vsync die offenen
+Menüs aus dem Gast-RAM (Task-Pool 0x2A9A30, Kette über +0x18): Entwicklermenü (Funktion
+0x103038, Zustand 1, Tabelle +0x38 bis 0x20CF90, Cursor +0x40) und jedes SUBMENU (Funktion
+0x1324B8 = Update aus dem Init-Callback 0x1325D8, Zustand 0, Tabelle +0x38 bis Funktion 0,
+Titel +0x3C, Cursor +0x40). t5-bevy zeigt den Text oben links (`DebugMenuText`), nur mit
+`T5_DW_DEBUG`. Ersetzt die entfernte Ausgabe, ändert keinen Spielzustand. Nutzertest offen.
 
 ## 3. Dateiverzeichnis (Testinhalte, ungenutzte Dateien)
 
