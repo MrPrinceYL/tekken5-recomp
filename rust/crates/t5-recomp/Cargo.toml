@@ -72,6 +72,8 @@ t5-iop-nu-sound-fdc40d = { path = "../recomp_iop/nu_sound_fdc40d" }
 t5-iop-sbse-drv-5ba564 = { path = "../recomp_iop/sbse_drv_5ba564" }
 t5-iop-sdr-driver-36b50d = { path = "../recomp_iop/sdr_driver_36b50d" }
 t5-iop-nu-file-manager-2fdaaa = { path = "../recomp_iop/nu_file_manager_2fdaaa" }
+t5-iop-vdgcu-d-dd2aea = { path = "../recomp_iop/vdgcu_d_dd2aea" }
+t5-iop-owadpcm-driver-072460 = { path = "../recomp_iop/owadpcm_driver_072460" }
 t5-vu = { path = "../t5-vu" }
 t5-vu-00 = { path = "../t5-vu-00" }
 t5-vu-01 = { path = "../t5-vu-01" }

@@ -227,8 +227,13 @@ impl IopExec {
 
     /// Start of the IOP heap: right after the recompiled modules' slots (64 KiB each, see
     /// tools/iop_modules.py), as on the IOP where free memory begins after the loaded modules.
+    /// Modules of the upper area (0x100000.., the Arcade History titles') count only once
+    /// loaded, so the main game's heap does not depend on them.
     fn heap_start(&self) -> u32 {
-        self.table.iter().map(|m| (m.base + m.size + 0xFFFF) & !0xFFFF).max().unwrap_or(0).max(0x0002_0000)
+        let end = |m: &IopModule| (m.base + m.size + 0xFFFF) & !0xFFFF;
+        let lower = self.table.iter().filter(|m| m.base < 0x0010_0000).map(end).max().unwrap_or(0);
+        let loaded = self.loaded.iter().map(|m| end(m)).max().unwrap_or(0);
+        lower.max(loaded).max(0x0002_0000)
     }
 
     /// AllocSysMemory: 0 = lowest fit, 1 = highest fit, 2 = at `at`.

@@ -23,13 +23,19 @@ import re
 import struct
 import sys
 
-# entry 6: the main game; IRXARC.BIN: Devil Within (other builds of NU_File_Manager etc.).
-SOURCES = ["tk5data3/entry6.bin", "files/IRXARC.BIN"]
+# entry 6: the main game; IRXARC.BIN: Devil Within (other builds of NU_File_Manager etc.);
+# archive entry 7 (tk5data.py): the Arcade History titles.
+SOURCES = ["tk5data3/entry6.bin", "files/IRXARC.BIN", "tk5data3/entry7_irx.bin"]
+# Sources whose modules go to the upper area: the main game never loads them, so its IOP heap
+# (which starts after the modules below 0x100000, see `heap_start` in iop/exec.rs) stays as is.
+UPPER = {"tk5data3/entry7_irx.bin"}
 # Sony drivers whose services the runtime emulates at the RPC / SIF level: not recompiled.
 EMULATED = {"mcman", "mcserv", "sio2man", "sio2d", "padman", "ds2u_d", "Dbc_Manager"}
 FIRST_BASE = 0x0002_0000
 SLOT = 0x1_0000
 LAST = 0x0010_0000
+UPPER_BASE = 0x0010_0000
+UPPER_LAST = 0x001C_0000
 
 
 def u32(b, o):
@@ -165,19 +171,22 @@ def main():
             secs, info = parse(img)
             if info["name"] in EMULATED:
                 continue
-            found[sha] = dict(img=img, secs=secs, info=info, src=f"{src}+{o:#x}")
+            found[sha] = dict(img=img, secs=secs, info=info, src=f"{src}+{o:#x}", order=(SOURCES.index(src), o))
     os.makedirs(os.path.join(ex, "iop"), exist_ok=True)
-    mods = sorted(found.items(), key=lambda kv: (kv[1]["src"].startswith("files"), kv[1]["src"]))
+    mods = sorted(found.items(), key=lambda kv: kv[1]["order"])
     base = FIRST_BASE
     rows, imps, exps = [], [], []
     for sha, md in mods:
+        upper = md["src"].split("+")[0] in UPPER
+        if upper:
+            base = max(base, UPPER_BASE)
         info = md["info"]
         tag = re.sub(r"[^A-Za-z0-9]+", "_", info["name"]).strip("_").lower()
         name = f"{tag}_{sha[:6]}"
         probe = relocate(md["img"], md["secs"], 0)
         size = len(probe) + info["bss"]
         slots = (size + SLOT - 1) // SLOT
-        if base + slots * SLOT > LAST:
+        if base + slots * SLOT > (UPPER_LAST if upper else LAST):
             raise SystemExit("IOP module area full")
         mem = relocate(md["img"], md["secs"], base)
         write_elf(os.path.join(ex, "iop", f"{name}.elf"), base, mem, info["entry"], info["gp"])

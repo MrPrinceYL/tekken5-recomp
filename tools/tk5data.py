@@ -7,11 +7,14 @@ Entries 0..6 are code compressed with the boot loader's LZ scheme (`lz_decompres
 SLUS 0x00D06010): 0..4 are complete ELFs, 5 and 6 are raw images that the boot code (0x00D060D0)
 decompresses to 0x001F0180 and 0x00488000. Entries 7..9 are data archives.
 
-Writes extracted/tk5data3/entry<N>.bin (decompressed), extracted/tk5data3_toc.csv.
+Writes extracted/tk5data3/entry<N>.bin (decompressed), extracted/tk5data3_toc.csv, and for the
+archives the stretch holding their IOP modules (the Arcade History titles load theirs from there)
+as extracted/tk5data3/entry<N>_irx.bin (input of iop_modules.py).
 """
 import csv
 import hashlib
 import os
+import re
 import struct
 import sys
 
@@ -73,6 +76,16 @@ def main():
                 print(f'{i}: {size:#x} -> {len(data):#x} {kind}')
             else:
                 w.writerow([i, f'0x{off:X}', size, 0, size, 'archive', ''])
+                f.seek(base + off)
+                data = f.read(size)
+                irx = [m.start() for m in re.finditer(rb'\x7fELF\x01\x01\x01', data)
+                       if struct.unpack_from('<H', data, m.start() + 16)[0] in (0xFF80, 0xFF81)]
+                if irx:
+                    # ponytail: one stretch from the first module to 256 KiB past the last
+                    # (no IRX is larger); split per module if an archive ever spreads them out.
+                    with open(os.path.join(out, 'tk5data3', f'entry{i}_irx.bin'), 'wb') as d:
+                        d.write(data[irx[0]:irx[-1] + 0x40000])
+                    print(f'{i}: {len(irx)} IOP modules')
 
 
 if __name__ == '__main__':
