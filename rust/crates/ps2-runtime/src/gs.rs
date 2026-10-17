@@ -1238,6 +1238,10 @@ impl Gs {
         while bytes.len() % 16 != 0 {
             bytes.push(0);
         }
+        if std::env::var_os("T5_DLLOG").is_some() {
+            let nz = bytes.iter().filter(|&&b| b != 0).count();
+            eprintln!("[dl] bp {sbp:#x} bw {sbw} psm {spsm:#x} at {sx},{sy} {rrw}x{rrh} bytes {} nonzero {nz} head {:02x?}", bytes.len(), &bytes[..bytes.len().min(16)]);
+        }
         self.download.clear();
         for c in bytes.chunks(16) {
             self.download.push_back(u128::from_le_bytes(c.try_into().unwrap()));

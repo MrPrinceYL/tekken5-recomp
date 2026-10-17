@@ -37,6 +37,20 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         max. 14,0 -> 10,2 ms / Bild. Nutzertest im Fenster: läuft flüssig.
 - [ ] B14 Effekte flackern (Nutzer 17.10.): Hit Sparks, Jinpachis Effekte, Sun Flare allgemein
       (Pool-Stage, Polar Paradise, ...). Vermutlich gemeinsame Ursache (Alpha-Blend/Partikel-Pfad im GS).
+      Analyse Sun Flare 17.10. (Linux, Polar = `stage.sh 10`, `T5_BURST=75` = jedes Bild 1 s lang,
+      Ergebnisse in `run/flare/`):
+      - Reproduziert headless: in einzelnen Bildern fehlt der GANZE Flare (Strahlen + Kreise),
+        nicht nur blasser. Messung: Helligkeit oberes linkes Bilddrittel 150,4/150,8 normal,
+        145,6/145,9 ohne Flare.
+      - GPU-Raster: 5 von 61 Bildern ohne Flare. CPU-Raster (`T5_GPU=0`, langsamer): ~60 % ohne,
+        oft viele Bilder am Stück. → kein GPU-Fehler; hängt von der Laufzeit/Last ab.
+      - Kein Verdeckungstest per Rücklesen: `T5_DLLOG=1` (protokolliert jede GS→EE-Übertragung,
+        `gs.rs local_to_host`) zeigt im ganzen Lauf 0 Rücklesungen.
+      - Nächste Vermutung: das Spiel misst die Render-Last (Timer / FINISH / SIGNAL / Vsync-Abstand)
+        und lässt den Flare bei „zu langsam“ weg. Gerätezeit = Host-Zeit (`Machine::now`), der
+        MTVU-Worker / GS-Thread liefern FINISH/SIGNAL u. U. später als echte HW. Nächster Schritt:
+        in der Flare-Zeichenfunktion die Bedingung finden (GS-Mitschnitt `T5_GSCAPTURE`: fehlen
+        die Flare-Primitive im Stream? dann EE-Entscheidung; RAM-Diff mit `T5_RAMSNAP`).
 
 ## P4 Programme
 - [ ] B12 Devil Within: Schwarzbild, hängt.
