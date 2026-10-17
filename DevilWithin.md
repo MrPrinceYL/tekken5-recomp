@@ -91,6 +91,24 @@ Nutzertest scheiterte genau daran (normales Menü).
 Status: gebaut (`cargo check`), **im Spiel noch ungetestet**. Offen: ob die Menütexte sichtbar
 sind (Debug-Schrift) und welche Testmodi ohne Entwicklerdateien (`sim:`/`host`) laufen.
 
+### Nutzertest 17.10.: Schalter greift, aber schwarzer Bildschirm
+Log: `devil: T5_DW_DEBUG=dev -> developer mode menu`, Spiel läuft weiter (Vsyncs, keine
+unbekannten Sprünge). **Ursache: die Textausgabe der Debug-Menüs wurde im Release entfernt**,
+die Menülogik nicht:
+- Entwicklermenü 0x103038: die Schleife über die Einträge am Ende (`while (*p != 0x20CF90)`)
+  hat keinen Körper mehr – dort stand die Ausgabe je Eintrag. Die Task hat keine Zeichenfunktion
+  (+0x24).
+- Untermenü-Widget „SUBMENU“ 0x132430 (Debug-Titelmenü, Menü 0x2B8170, MAKINO MENU): Zeichen-
+  Callback +0x2C = 0x132618 ist `jr ra; nop`, in der Eintragsschleife 0x1325EC stehen 4 `nop`
+  an Stelle des Ausgabeaufrufs.
+→ Die Menüs funktionieren blind (Steuerkreuz hoch = Bit 0x10, runter = 0x40, Auswahl Kreuz
+0x2000), zeigen aber nichts. Blind im Entwicklermenü (Nulleinträge werden übersprungen):
+0 MAKINO MENU, 1 SHUJI, 2 HASHI, 3 MATTY, 4 KONDOH, 5 CHARA VIEW, 6 MODEL VIEW, 7 STREAM TEST,
+8 GAME LOAD START, 9 TITLE(Debug), 10 TITLE(Release), 11 BASE_PAK RELOAD, 12 MPL RELOAD,
+13 GAME MODE.
+Sichtbar machen ginge nur mit einer eigenen Anzeige außerhalb des Spielcodes (z. B. Bevy-Overlay,
+das Tabelle +0x38 und Auswahl +0x40 aus dem Gast-RAM liest) – Entscheidung des Nutzers offen.
+
 ## 3. Dateiverzeichnis (Testinhalte, ungenutzte Dateien)
 
 Devil Within liest seine Daten aus `cd:tk5data2.bin` über ein eingebautes Verzeichnis:
