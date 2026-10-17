@@ -13,7 +13,7 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
       (vermutlich Analogwerte/Neutralstellung, siehe B1).
 - [ ] B3 Options → Game Options: Auf „Rounds“ ändert Links/Rechts die Difficulty
       (Eingabe oder Menülogik prüfen, evtl. B1).
-- [~] B15 Stick-Bewegungen werden vom Spiel nicht erkannt (Nutzer 17.10., unter Linux
+- [x] B15 Stick-Bewegungen werden vom Spiel nicht erkannt (Nutzer 17.10., unter Linux
       getestet). **Ursache (17.10.):** padman-HLE schrieb pad_data +0x64 modeConfig = 1. Das
       echte padman (in main `.dmh` eingebettet, Code +0x2840) setzt 2, wenn der Controller die
       Konfig-Abfrage beantwortet (DualShock 2), 1 erst nach 10 Fehlversuchen. libpad
@@ -24,7 +24,8 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         Analog-Weg (SetMainMode, EnterPressMode = SetButtonInfo, SetActAlign); libpad liest das
         Ergebnis je Kommando woanders (0x06/0x08 → +0x14, 0x0A → +0x10, 0x0B → +0x1C,
         0x14 → +0x08, sonst +0x0C), die HLE schrieb immer +0x0C → Devil Within (0x22A910)
-        blieb vor scePadRead stehen. Fix: Ergebnis an die gelesene Stelle. Nutzertest offen.
+        blieb vor scePadRead stehen. Fix: Ergebnis an die gelesene Stelle. Nutzertest 17.10.:
+        Tasten in T5, StarBlade, Devil Within ok (Arcade History ungetestet, hängt an B12).
 
 ## P2 Ton
 - [x] B4 Kampf: keine Musik. (Nutzer 17.10.: Musik da)
@@ -113,7 +114,8 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         Menüweg headless: MODE SELECT 7× DOWN, CROSS, [RIGHT=T2], CROSS, CROSS (Controls),
         CROSS (NO speichern), LEFT + CROSS.
 
-- [~] B16 Devil Within: 30 fps und Zeitlupe (Nutzer 17.10.).
+- [x] B16 Devil Within: 30 fps und Zeitlupe (Nutzer 17.10.). **Behoben 17.10.: Nutzertest im
+      Fenster flüssige 60 fps, keine Zeitlupe.**
       - Messung (headless, im Spiel, 17.10.): GAME FRAMES 150 / 5 s, MTVU-Worker ~3000 ms /
         5 s (= ~20 ms pro Bild, Grenze 16,7 ms → Spiel lässt jedes 2. Bild aus), davon VU1
         ~2700 ms bei ~125 Mio. Paaren = ~21 ns/Paar (Tekken 5 mit Shapes: 2–4 ns).
@@ -153,7 +155,7 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         max. 4 je Block; +207). Laufzeit-Einsprünge „mitten im Block“ in alten Dumps waren nur
         Folge des Paar-für-Paar-Laufs.
       - Prüfung: vu-bench Moonlit 3000/3000 bitgenau (3,3–3,6 ns/Paar auf diesem Windows-PC).
-        Nutzertest Devil Within offen.
+        Nutzertest 17.10.: flüssige 60 fps.
 
 ## Selbst gefunden
 - [x] S0 **Fehlende EE-Funktionen** 0x2EE660 / 0x2EE6A0 / 0x2EE6E0: virtuelle Methoden (Aufruf per
