@@ -13,6 +13,8 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
       (vermutlich Analogwerte/Neutralstellung, siehe B1).
 - [ ] B3 Options → Game Options: Auf „Rounds“ ändert Links/Rechts die Difficulty
       (Eingabe oder Menülogik prüfen, evtl. B1).
+- [ ] B15 Stick-Bewegungen werden vom Spiel nicht erkannt (Nutzer 17.10., unter Linux
+      getestet). B1-Fix (`Input::sticks`) prüfen: kommen Achswerte über gilrs/HID an?
 
 ## P2 Ton
 - [x] B4 Kampf: keine Musik. (Nutzer 17.10.: Musik da)
@@ -29,6 +31,8 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
       liegen übereinander (Vergleichsbild PCSX2).
 - [ ] B10 FMVs: Bildartefakte (Nutzer 17.10.: weiterhin, alle FMVs).
 - [ ] B11 Polar Paradise (Pinguin-Stage): Logik 60, aber nur 30 gerenderte Bilder/s.
+- [ ] B14 Effekte flackern (Nutzer 17.10.): Hit Sparks, Jinpachis Effekte, Sun Flare in der
+      Pool-Stage. Vermutlich gemeinsame Ursache (Alpha-Blend/Partikel-Pfad im GS).
 
 ## P4 Programme
 - [ ] B12 Devil Within: Schwarzbild, hängt.
