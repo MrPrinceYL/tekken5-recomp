@@ -129,6 +129,14 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         erklärt die ~21 ns/Paar NICHT. Nutzertest der fps offen. Nächster Schritt, falls
         weiter 30: Worker-Profil (`T5_PROFILE` + `T5_PROFILE_MTVU`, gibt es nur in
         t5-headless → Nutzer fragen).
+      - Worker-Profil im Fenster (Nutzer, 17.10., `T5_PROFILE=120` + `T5_PROFILE_MTVU=1`, jetzt
+        auch in t5-bevy): GAME 90–146 / 5 s, Worker 3,4–4,5 s / 5 s belegt. Proben:
+        `vu::pair_dyn_nf` 38 %, `run_inner` 8 %, `pair_dyn` 4 %, Warten 25 %, übersetzte
+        Blöcke < 2 %. `pair_dyn_nf` kommt nur aus `vu::resolve`, wenn ein VU1-Paar NICHT in
+        `sheets/vu_microcode.csv` steht → der Nutzer spielt Bereiche mit Mikrocode, den mein
+        Headless-Lauf (nur der Anfang) nie geladen hat. Nächster Schritt: `T5_VUDUMP=1` im
+        Fenster durch dieselben Bereiche → `gen_vu.py --collect rust/vu_dumps` → `gen_vu.py`.
+        (Achtung: eine erste Messung war mit noch gesetztem `T5_VUSHAPES` verfälscht.)
 
 ## Selbst gefunden
 - [x] S0 **Fehlende EE-Funktionen** 0x2EE660 / 0x2EE6A0 / 0x2EE6E0: virtuelle Methoden (Aufruf per
