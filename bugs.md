@@ -30,9 +30,11 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
 - [ ] B9 MODE SELECT: Alle Einträge gelb statt weiß/grau. Beschreibungstexte aller Einträge
       liegen übereinander (Vergleichsbild PCSX2).
 - [ ] B10 FMVs: Bildartefakte (Nutzer 17.10.: weiterhin, alle FMVs).
-- [~] B11 Polar Paradise (Pinguin-Stage): Logik 60, aber nur 30 gerenderte Bilder/s.
+- [x] B11 Polar Paradise (Pinguin-Stage): Logik 60, aber nur 30 gerenderte Bilder/s.
       - Ursache (17.10.): MTVU-Worker > 16,7 ms pro Bild, weil Polar-VU-Mikrocode nie
         gesammelt war und Paar für Paar lief. Details + Messwerte: CLAUDE.md Fortschritt.
+      - Fix 17.10.: Mikrocode gesammelt (gen_vu.py --collect / --collect-shapes), Worker
+        max. 14,0 -> 10,2 ms / Bild. Nutzertest im Fenster: läuft flüssig.
 - [ ] B14 Effekte flackern (Nutzer 17.10.): Hit Sparks, Jinpachis Effekte, Sun Flare in der
       Pool-Stage. Vermutlich gemeinsame Ursache (Alpha-Blend/Partikel-Pfad im GS).
 
