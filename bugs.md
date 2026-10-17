@@ -37,20 +37,30 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         max. 14,0 -> 10,2 ms / Bild. Nutzertest im Fenster: läuft flüssig.
 - [ ] B14 Effekte flackern (Nutzer 17.10.): Hit Sparks, Jinpachis Effekte, Sun Flare allgemein
       (Pool-Stage, Polar Paradise, ...). Vermutlich gemeinsame Ursache (Alpha-Blend/Partikel-Pfad im GS).
-      Analyse Sun Flare 17.10. (Linux, Polar = `stage.sh 10`, `T5_BURST=75` = jedes Bild 1 s lang,
-      Ergebnisse in `run/flare/`):
+      Analyse Sun Flare 17.10. (Linux, Polar = `stage.sh 10` mit dem ALTEN Spielstand: seit dem
+      freigeschalteten Spielstand (32bf0cbe) ist 10 = Acid Rain → `T5_MEMSRC=<memcard-Kopie mit
+      port0/BASLUS-21059/old/>`; `T5_BURST=75` = jedes Bild 1 s lang, Ergebnisse in `run/flare/`):
       - Reproduziert headless: in einzelnen Bildern fehlt der GANZE Flare (Strahlen + Kreise),
         nicht nur blasser. Messung: Helligkeit oberes linkes Bilddrittel 150,4/150,8 normal,
         145,6/145,9 ohne Flare.
-      - GPU-Raster: 5 von 61 Bildern ohne Flare. CPU-Raster (`T5_GPU=0`, langsamer): ~60 % ohne,
-        oft viele Bilder am Stück. → kein GPU-Fehler; hängt von der Laufzeit/Last ab.
+      - GPU-Raster: 5 von 61 Bildern ohne Flare, in zwei Läufen EXAKT dieselben Bilder (4488,
+        4508, 4515, 4521, 4522) → deterministisch, kein Timing. CPU-Raster (`T5_GPU=0`): anderes
+        Muster (~60 % ohne) - vermutlich nur, weil der langsamere Lauf die Kämpfer anders stehen
+        lässt (`--press` in Host-Sekunden), nicht widerlegt.
       - Kein Verdeckungstest per Rücklesen: `T5_DLLOG=1` (protokolliert jede GS→EE-Übertragung,
         `gs.rs local_to_host`) zeigt im ganzen Lauf 0 Rücklesungen.
-      - Nächste Vermutung: das Spiel misst die Render-Last (Timer / FINISH / SIGNAL / Vsync-Abstand)
-        und lässt den Flare bei „zu langsam“ weg. Gerätezeit = Host-Zeit (`Machine::now`), der
-        MTVU-Worker / GS-Thread liefern FINISH/SIGNAL u. U. später als echte HW. Nächster Schritt:
-        in der Flare-Zeichenfunktion die Bedingung finden (GS-Mitschnitt `T5_GSCAPTURE`: fehlen
-        die Flare-Primitive im Stream? dann EE-Entscheidung; RAM-Diff mit `T5_RAMSNAP`).
+      - GS-Mitschnitt (`T5_GSCAPTURE=75`, ausgewertet mit scratch-Skript gsprims2.py): die
+        Flare-Elemente sind Quads (je 2 Dreiecke), ALPHA 0x48 (Cs*As+Cd, additiv), TEST 0x5000f
+        (Alpha != 0, Z >=), Textur tbp 11200/11232/11264, Helligkeit im Vertex-Alpha. In den
+        Halbbildern 18, 25, 31, 32 (Abstände = die dunklen Bilder) FEHLEN diese Quads komplett
+        im GS-Strom; Muster wiederholt sich ~alle 41 Bilder (59, 65/66, 72/73; 93, 100, 106/107).
+        → Nicht der Raster: der Spielcode (EE/VU1) schickt den Flare in diesen Bildern nicht.
+      - EE-FPU / VU-Semantik (`ee-core/fpu.rs`, `vu0.rs`) geprüft: kein IEEE, Überlauf geklemmt,
+        Denormale = 0 - keine offensichtliche Ursache. (PCSX2 GameIndex SLUS-21059: eeClampMode 2
+        „Fixes camera …“.)
+      - Nächster Schritt: Weg der Flare-Pakete finden (PATH3/GIF-DMA aus EE-RAM oder VIF1/VU1),
+        dann die EE-Funktion, die das Paket baut, und deren Bedingung (Sichtbarkeitstest der
+        Sonne - Strahl gegen Kämpfer? ~41-Bilder-Takt passt zu einer Idle-Animation).
 
 ## P4 Programme
 - [ ] B12 Devil Within, Tekken 1 Arcade History, Tekken 2 Arcade History, Tekken 3 Arcade History: Schwarzbild, hängt.
