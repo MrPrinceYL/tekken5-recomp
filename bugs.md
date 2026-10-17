@@ -36,7 +36,9 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
       - Fix 17.10.: Mikrocode gesammelt (gen_vu.py --collect / --collect-shapes), Worker
         max. 14,0 -> 10,2 ms / Bild. Nutzertest im Fenster: läuft flüssig.
 - [ ] B14 Effekte flackern (Nutzer 17.10.): Hit Sparks, Jinpachis Effekte, Sun Flare allgemein
-      (Pool-Stage, Polar Paradise, ...). Vermutlich gemeinsame Ursache (Alpha-Blend/Partikel-Pfad im GS).
+      (Pool-Stage, Polar Paradise, ...). **Ursache Timer-1-Fehler in `timers.rs`, behoben 17.10.
+      (siehe unten) – Nutzertest offen** (Flare, Hit Sparks, Jinpachi: alle laufen über dasselbe
+      Effektbudget).
       Analyse Sun Flare 17.10. (Linux, Polar = `stage.sh 10` mit dem ALTEN Spielstand: seit dem
       freigeschalteten Spielstand (32bf0cbe) ist 10 = Acid Rain → `T5_MEMSRC=<memcard-Kopie mit
       port0/BASLUS-21059/old/>`; `T5_BURST=75` = jedes Bild 1 s lang, Ergebnisse in `run/flare/`):
@@ -70,11 +72,20 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         0xd − 0xc); ab **95 %** werden die restlichen Effekte des Bildes nicht mehr gezeichnet.
         Dazu Hysterese über `FUN_002dde30` (anderer Lastwert): ≥ 120 % → Effektbudget 0, < 100 %
         → wieder 480 (`DAT_00153260/64/68`).
-        → Das Spiel drosselt selbst Effekte bei hoher Last. Bei uns zählt Timer 1 Host-Zeit
-        (Gerätezeit = Host-Zeit), die EE wartet dabei auf Worker/GS (Sync, Gegendruck) → misst
-        mehr Last als echte HW. Nächster Schritt: Messwert von `FUN_002ddc00` an der Stelle
-        loggen (welcher Anteil: eigene EE-Rechenzeit oder Warten auf Worker/GS?), dann
-        entscheiden (Nutzer), wie Timer 1 hier gerechnet werden soll.
+        Der Abschalter war die Hysterese: der Lastwert ist die **Renderdauer** des letzten Bildes
+        (0x440480 + 0x238 = Timer 1 beim Render-DMA-Ende, Handler 0x31d708 in 0x334e88, minus
+        Startzeit). `T5_T1LOG=1` (jedes Lesen/Schreiben von Timer 1 → `t1log.txt`: Last in %,
+        Aufrufe, Renderdauer, COUNT/MODE/Umläufe/COMP) zeigte: normal ~60 %, aber alle ~7 Bilder
+        negativ (als ~174 000 % = 2^32) → Effekte aus.
+        **Fehler in `timers.rs`:** Timer 1 läuft mit BUSCLK/256, CMPE + OVFE, COMP = 0. Der
+        Umlauf 0xFFFF → 0 ist Compare UND Überlauf zugleich; `schedule` wählt nur eins
+        (Compare) → OVFF nie gesetzt → der Handler 0x337718 zählte nie einen Umlauf
+        (`DAT_00440a60` blieb 1), die Spieluhr sprang alle 2^16 Takte zurück. Fix: bei COMP = 0
+        ohne ZRET setzt das Compare-Ereignis auch OVFF (+ Interrupt bei OVFE), wie PCSX2. Dazu:
+        fällige Timer-Ereignisse vor jedem Timer-Zugriff verarbeiten und alle der Reihe nach
+        (Neuplanung ab Ereigniszeit, nicht ab „jetzt“).
+        Ergebnis Polar: Bilder mit reduziertem Flare 254 → 4 (ein echter Host-Hänger, Renderdauer
+        124 %), LOGIC 300/5 s. Nicht der Logik-Takt: nur der Wert, den Timer 1 liefert.
 
 ## P4 Programme
 - [ ] B12 Devil Within, Tekken 1 Arcade History, Tekken 2 Arcade History, Tekken 3 Arcade History: Schwarzbild, hängt.

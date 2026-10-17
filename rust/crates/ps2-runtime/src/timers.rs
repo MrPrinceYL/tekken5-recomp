@@ -112,34 +112,44 @@ impl Timers {
 }
 
 pub fn update(m: &mut Machine, now: u64) {
+    // Every event that is due, in order: one handled late must not hide the next (Timer 1 has
+    // compare and overflow on; a wrap after a late compare was lost and the game's clock, which
+    // counts the wraps, fell back 2^16 counts - bugs.md B14).
     for n in 0..4 {
-        let t = &mut m.timers.t[n];
-        if t.next > now {
-            continue;
-        }
-        // The event happened at t.next: the count was COMP (compare) or wrapped to 0.
-        let at = t.next;
-        let period = t.period();
-        let hit_comp = t.next_is_comp;
-        let raise = if hit_comp { t.mode & 0x100 != 0 } else { t.mode & 0x200 != 0 };
-        if hit_comp {
-            if t.mode & 0x100 != 0 {
-                t.mode |= 0x400;
+        while m.timers.t[n].next <= now {
+            let t = &mut m.timers.t[n];
+            // The event happened at t.next: the count was COMP (compare) or wrapped to 0.
+            let at = t.next;
+            let period = t.period();
+            let hit_comp = t.next_is_comp;
+            // COMP = 0 (without ZRET) is reached by the wrap: that is the overflow as well, and
+            // `schedule` picks only one of the two (Timer 1 of the game: both interrupts on, COMP 0;
+            // without OVFF its handler never counted a wrap - bugs.md B14).
+            let wrap_too = hit_comp && t.comp == 0 && t.mode & 0x40 == 0;
+            let raise = if hit_comp { t.mode & 0x100 != 0 } else { t.mode & 0x200 != 0 } || (wrap_too && t.mode & 0x200 != 0);
+            if hit_comp {
+                if t.mode & 0x100 != 0 {
+                    t.mode |= 0x400;
+                }
+                if wrap_too && t.mode & 0x200 != 0 {
+                    t.mode |= 0x800;
+                }
+                // ZRET: back to 0 on the tick after COMP.
+                t.base = if t.mode & 0x40 != 0 { 0 } else { t.comp };
+                t.base_time = if t.mode & 0x40 != 0 { at + period } else { at };
+            } else {
+                t.mode |= 0x800;
+                t.base = 0;
+                t.base_time = at;
             }
-            // ZRET: back to 0 on the tick after COMP.
-            t.base = if t.mode & 0x40 != 0 { 0 } else { t.comp };
-            t.base_time = if t.mode & 0x40 != 0 { at + period } else { at };
-        } else {
-            t.mode |= 0x800;
-            t.base = 0;
-            t.base_time = at;
-        }
-        if t.base_time > now {
-            t.base_time = now;
-        }
-        t.schedule(now);
-        if raise {
-            m.raise(INTC_TIM0 + n as u32);
+            if t.base_time > now {
+                t.base_time = now;
+            }
+            // From the event, not from now (see above): base_time is when the count was base.
+            t.schedule(t.base_time);
+            if raise {
+                m.raise(INTC_TIM0 + n as u32);
+            }
         }
     }
 }

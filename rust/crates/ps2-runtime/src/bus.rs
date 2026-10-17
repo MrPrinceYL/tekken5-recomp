@@ -67,12 +67,42 @@ fn phys(addr: u32) -> u32 {
     if addr >= 0x8000_0000 && addr < 0xC000_0000 { addr & 0x1FFF_FFFF } else { addr }
 }
 
+/// T5_T1LOG=1: each Timer 1 COUNT read -> t1log.txt: vblank, the game's frame load in % (as
+/// FUN_00337a58 - DAT_00154e80 over 147456000 / 60 bus clocks, see bugs.md B14), the innermost
+/// calls, the render time of the last frame and the raw timer state.
+fn t1log(m: &Machine, c: &Ctx, count: u32) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let mode = m.timers.t[1].mode;
+    let wraps = ram_read(m, 0x440A60, 4) as u32 + (mode >> 11 & 1);
+    let shift = if mode & 3 == 0 { 0 } else { 2 << (mode & 3) };
+    let val = (((wraps as u64) << 16 | count as u64) << shift) as u32;
+    let el = val.wrapping_sub(ram_read(m, 0x154E80, 4) as u32) as i32;
+    let calls: Vec<String> = (0..4u32).map(|i| format!("{:x}", c.trail[(c.depth.wrapping_sub(i) & 63) as usize])).collect();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("t1log.txt") {
+        use std::io::Write;
+        // Render time of the last frame (0x440480 + 0x238, written by the DMA-end handler 0x31d708).
+        let render = ram_read(m, 0x4406B8, 4) as u32;
+        let _ = writeln!(f, "{} {:.2} {} render {:.2} | count {count:#x} mode {mode:#x} wraps {wraps} comp {:#x}", crate::VBLANKS.load(Relaxed), el as f64 / 2_457_600.0 * 100.0, calls.join(","), render as f64 / 2_457_600.0 * 100.0, m.timers.t[1].comp);
+    }
+}
+
 pub fn io_read(c: &mut Ctx, addr: u32, size: usize) -> u128 {
     let _ = c;
     let m = machine();
     let a = phys(addr);
     let v: u128 = match a {
-        0x1000_0000..=0x1000_1FFF => m.timers.read(a, m.now()) as u128,
+        0x1000_0000..=0x1000_1FFF => {
+            // A wrap / compare that is due must show in MODE (OVFF / EQUF) together with the
+            // count: the game reads COUNT, then MODE.OVFF to add the overflow its handler has
+            // not counted yet (FUN_00337a58). Unprocessed, the time jumped back a whole wrap.
+            let now = m.now();
+            crate::timers::update(m, now);
+            let v = m.timers.read(a, now);
+            if a == 0x1000_0800 && crate::diag::enabled("T5_T1LOG") {
+                t1log(m, c, v);
+            }
+            v as u128
+        }
         0x1000_2000..=0x1000_2FFF => crate::ipu::read(m, a) as u128,
         0x1000_3000..=0x1000_37FF => {
             mtvu_sync(m);
@@ -115,7 +145,17 @@ pub fn io_write(c: &mut Ctx, addr: u32, size: usize, v: u128) {
     let m = machine();
     let a = phys(addr);
     match a {
-        0x1000_0000..=0x1000_1FFF => { let now = m.now(); m.timers.write(a, v as u32, now) }
+        0x1000_0000..=0x1000_1FFF => {
+            let now = m.now();
+            crate::timers::update(m, now);
+            if a & !0x30 == 0x1000_0800 && diag::enabled("T5_T1LOG") {
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("t1log.txt") {
+                    use std::io::Write;
+                    let _ = writeln!(f, "W {:#x} = {:#x} (count {:#x} mode {:#x})", a, v as u32, m.timers.read(0x1000_0800, now), m.timers.t[1].mode);
+                }
+            }
+            m.timers.write(a, v as u32, now)
+        }
         0x1000_2000..=0x1000_2FFF => crate::ipu::write(m, a, v as u64),
         0x1000_3000..=0x1000_37FF => match m.mtvu.as_mut() {
             Some(t) => t.send(crate::mtvu::Cmd::GifReg(a, v as u32)),
