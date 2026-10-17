@@ -35,8 +35,8 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         gesammelt war und Paar für Paar lief. Details + Messwerte: CLAUDE.md Fortschritt.
       - Fix 17.10.: Mikrocode gesammelt (gen_vu.py --collect / --collect-shapes), Worker
         max. 14,0 -> 10,2 ms / Bild. Nutzertest im Fenster: läuft flüssig.
-- [ ] B14 Effekte flackern (Nutzer 17.10.): Hit Sparks, Jinpachis Effekte, Sun Flare in der
-      Pool-Stage. Vermutlich gemeinsame Ursache (Alpha-Blend/Partikel-Pfad im GS).
+- [ ] B14 Effekte flackern (Nutzer 17.10.): Hit Sparks, Jinpachis Effekte, Sun Flare allgemein
+      (Pool-Stage, Polar Paradise, ...). Vermutlich gemeinsame Ursache (Alpha-Blend/Partikel-Pfad im GS).
 
 ## P4 Programme
 - [ ] B12 Devil Within: Schwarzbild, hängt.
