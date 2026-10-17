@@ -167,6 +167,47 @@ mit Eintragsanzahl 0 (0x102FD8 löscht +0x3C, gezählt wird nur in Zustand 0, de
 Wiedereinstieg 0x1034A0 auslösen würde) → nächstes hoch/runter = Endlosschleife 0x1031E8
 (Nutzerbericht: Hänger nach CHARA VIEW). Der Hook setzt dann Zustand 0 (neu zählen), wie 0x1034A0.
 
+## 2b. Mod-Menü (nur Branch `devil/debug`, nur mit `T5_DW_DEBUG`, nicht 1:1)
+
+`t5-recomp/src/devil_mod.rs`. Öffnen/Schließen: SELECT halten + L1; mit SELECT gehalten:
+hoch/runter Eintrag, links/rechts Auswahl, KREIS ausführen.
+
+**Belegte Strukturen** (Funktionsnamen aus den Debug-Strings der Bibliothek `tsEHpMan*`):
+- Figuren („man“, erzeugt von 0x148400 → 0x148070): Tasks Typ 1000 mit Update 0x1493F8 im
+  Task-Pool. +0x1C Name, +0x140 Index Eingabe-Datensatz, +0x144 Index Figurdaten, +0x148 KI,
+  +0x154 Bit 2 = KI-gesteuert (nur bei Erzeugung und Tod ausgewertet: ohne Bit → Game Over
+  0x10E0C8, mit Bit → besiegter Gegner 0x11F9B0), +0x160 Modell, +0x162 Pad-Port.
+- Eingabe-Datensatz (0x15C6A0, Pool *0x42B6FC, Schritt [0x42B6F0], Anzahl [0x42B6EA]):
+  +0 Controller: 0 = Pad 1 (0x15C4E0), < 0 = KI-Puffer [0x41BED0] (die KI jeder Figur schreibt
+  ihn vor deren Update, 0x15E5F8), sonst keine Eingabe. Gegner nutzen also denselben
+  Eingabeweg wie der Spieler.
+- Spieler („ManMgr“ 0x146FB0, [0x41BB10]+0x140 → Eintrag *0x42B66C): Eintrag +0 = Spielerfigur
+  (0x147A98); Kamera, HUD und Gegner-Ziel folgen ihr.
+- Figurdaten (0x16EF88): +0x3004 Lebensverwalter: Leben +0x301C / Max +0x3020, Team +0x300A,
+  Devil-Leiste +0x3024 / Max +0x3028; Positionsmatrix +0x70, Yaw +0x110.
+
+**Einträge:**
+- **Switch character** (links/rechts Ziel = jede lebende Figur der Szene): Ziel-Controller = 0,
+  bisheriger Spieler = keine Eingabe, ManMgr → Ziel, optional Team des Spielers fürs Ziel
+  („Team swap when switching“, Standard an). Damit sind auch Gegner und Bosse steuerbar: sie
+  bekommen die Pad-Eingabe statt der KI-Eingabe über denselben Weg. Rückweg per Eintrag oder
+  automatisch, wenn das Ziel verschwindet.
+- **Unlimited health / devil gauge** (gesteuerte Figur, je Vsync Wert = Max).
+- matty-Cheats: Restore 30% health, Set/Clear COLLECT flags.
+- **Position probe:** zeigt Kandidaten der Position (Matrix +0x30, Yaw, obj+0x16C) – Grundlage für
+  Teleport/No-Clip.
+
+**Noch nicht gebaut (Begründung):**
+- Teleport / No-Clip: maßgebliche Position nicht belegt (Matrix +0x70 vs. Bewegungs-Engine
+  0x165F80/0x16D728); erst Messung mit „Position probe“ im Spiel.
+- Spawn Gegner/Bosse/Objekte/Items: Erzeugung 0x148400 braucht einen Spawn-Datensatz aus den
+  Ereignisdaten und im Raum geladene Figurdaten; dafür Ereignisweg `EV_TYPE_OBJ`/`init_obj`
+  analysieren und Gast-Aufrufe mit Argumenten.
+- Stage select: vorhanden im Debug-Titelmenü (`T5_DW_DEBUG=title` → STAGE SELECT).
+- Figuren aus dem normalen Tekken 5 (z. B. Kazuya): andere Engine und Formate (TK5DATA0/1) –
+  Portierung nicht machbar ohne eigenes Großprojekt; nächstliegend: boss2 (Kazuya-/Heihachi-
+  Bewegungen) per Switch character.
+
 ## 3. Dateiverzeichnis (Testinhalte, ungenutzte Dateien)
 
 Devil Within liest seine Daten aus `cd:tk5data2.bin` über ein eingebautes Verzeichnis:

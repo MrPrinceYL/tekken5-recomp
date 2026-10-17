@@ -14,7 +14,10 @@
 //!   *0x42B66C stride [0x42B660] count [0x42B65A] (short); entry +0 = the player character
 //!   (0x147A98; camera, HUD and the enemies' target follow it; 0x1471F8 sets it).
 //! - Character data (0x16EF88): *0x4804B4 stride [0x4804A8] count [0x4804A2] (short); life
-//!   manager at +0x3004: life +0x301C, max +0x3020 (floats, 0x16FCE0).
+//!   manager at +0x3004: life +0x301C, max +0x3020 (floats, 0x16FCE0), team +0x300A (short,
+//!   tsEHpManGet/SetTeamID 0x14A4E0 / 0x14A460), devil gauge +0x3024, max +0x3028 (floats,
+//!   tsEHpManGet/SetDGauge 0x14ACB0 / 0x14AD50 -> 0x16FDF0), position matrix +0x70
+//!   (tsEHpManGetPosMtxPtr 0x14A138), yaw +0x110 (0x14A738).
 
 use ps2_runtime::bus::{ram_read, ram_write};
 use ps2_runtime::Machine;
@@ -125,15 +128,20 @@ struct State {
     prev_held: u32,
     /// Index into the character list of the switch target.
     pick: usize,
-    /// Active switch: (original player, its controller, target, the target's controller).
-    switched: Option<(u32, i16, u32, i16)>,
+    /// Active switch: (original player, its controller, target, the target's controller,
+    /// the target's team before a swap).
+    switched: Option<(u32, i16, u32, i16, Option<i16>)>,
     god: bool,
+    devil: bool,
+    /// Give a switched-to character the player's team (it fights the others).
+    swap_team: bool,
+    probe: bool,
     last: String,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
 
-const ENTRIES: usize = 7;
+const ENTRIES: usize = 10;
 
 /// Control `target`: pad 1 drives it, the current player gets no input, the ManMgr entry
 /// (camera, HUD, enemy target) points at it.
@@ -155,18 +163,30 @@ fn switch_to(m: &mut Machine, st: &mut State, target: u32) -> String {
     ram_write(m, rt, 2, 0);
     ram_write(m, rp, 2, 1);
     ram_write(m, slot, 4, target as u64);
-    st.switched = Some((player, cp, target, ct));
+    let mut team = None;
+    if st.swap_team {
+        let (dp, dt) = (char_data(m, player), char_data(m, target));
+        if dp != 0 && dt != 0 {
+            team = Some(half(m, dt + 0x300A));
+            ram_write(m, dt + 0x300A, 2, half(m, dp + 0x300A) as u16 as u64);
+        }
+    }
+    st.switched = Some((player, cp, target, ct, team));
     ps2_runtime::diag::log(format!("devil mod: control {target:#x} (was {player:#x})"));
     format!("now controlling {}", name(m, target))
 }
 
 /// Undo a switch (if the original player still exists).
 fn restore(m: &mut Machine, st: &mut State) {
-    let Some((player, cp, target, ct)) = st.switched.take() else { return };
+    let Some((player, cp, target, ct, team)) = st.switched.take() else { return };
     if alive(m, target) {
         let rt = input_record(m, target);
         if rt != 0 {
             ram_write(m, rt, 2, ct as u16 as u64);
+        }
+        let dt = char_data(m, target);
+        if let (Some(team), true) = (team, dt != 0) {
+            ram_write(m, dt + 0x300A, 2, team as u16 as u64);
         }
     }
     if alive(m, player) {
@@ -184,25 +204,26 @@ fn restore(m: &mut Machine, st: &mut State) {
 /// Every vertical blank while Devil Within runs: input, effects, menu text.
 pub fn update(m: &mut Machine, out: &mut String) {
     let mut g = STATE.lock().unwrap();
-    let st = g.get_or_insert_with(State::default);
+    let st = g.get_or_insert_with(|| State { swap_team: true, ..State::default() });
     // A switched-to character that died or was removed: give control back.
-    if let Some((_, _, target, _)) = st.switched {
+    if let Some((_, _, target, _, _)) = st.switched {
         if !alive(m, target) {
             restore(m, st);
             st.last = "controlled character is gone, back to the original".into();
         }
     }
-    // Unlimited health for the character in control.
-    if st.god {
-        let slot = player_slot(m);
-        let p = if slot != 0 { word(m, slot) } else { 0 };
-        let cd = if p != 0 { char_data(m, p) } else { 0 };
-        if cd != 0 {
-            let life = f32::from_bits(word(m, cd + 0x301C));
+    // Unlimited health / devil gauge for the character in control.
+    let slot = player_slot(m);
+    let p = if slot != 0 { word(m, slot) } else { 0 };
+    let cd = if p != 0 { char_data(m, p) } else { 0 };
+    if cd != 0 {
+        if st.god && f32::from_bits(word(m, cd + 0x301C)) > 0.0 {
             let max = word(m, cd + 0x3020);
-            if life > 0.0 {
-                ram_write(m, cd + 0x301C, 4, max as u64);
-            }
+            ram_write(m, cd + 0x301C, 4, max as u64);
+        }
+        if st.devil {
+            let max = word(m, cd + 0x3028);
+            ram_write(m, cd + 0x3024, 4, max as u64);
         }
     }
     let held = word(m, PAD_HELD);
@@ -251,6 +272,18 @@ pub fn update(m: &mut Machine, out: &mut String) {
                     st.god = !st.god;
                     format!("unlimited health {}", if st.god { "on" } else { "off" })
                 }
+                6 => {
+                    st.devil = !st.devil;
+                    format!("unlimited devil gauge {}", if st.devil { "on" } else { "off" })
+                }
+                7 => {
+                    st.swap_team = !st.swap_team;
+                    format!("team swap when switching {}", if st.swap_team { "on" } else { "off" })
+                }
+                8 => {
+                    st.probe = !st.probe;
+                    format!("position probe {}", if st.probe { "on" } else { "off" })
+                }
                 3 => {
                     ps2_runtime::kernel::request_guest_call(HEAL_30);
                     "restored 30% health (game function 0x1D92B0)".into()
@@ -263,10 +296,11 @@ pub fn update(m: &mut Machine, out: &mut String) {
                     ps2_runtime::kernel::request_guest_call(CLEAR_COLLECT);
                     "all COLLECT flags cleared".into()
                 }
-                _ => {
+                9 => {
                     st.open = false;
                     String::new()
                 }
+                _ => String::new(),
             };
         }
     }
@@ -278,6 +312,9 @@ pub fn update(m: &mut Machine, out: &mut String) {
         "Restore 30% health (matty debug)".to_string(),
         "Set COLLECT flags (matty debug)".to_string(),
         "Clear COLLECT flags (matty debug)".to_string(),
+        format!("Unlimited devil gauge: {}", if st.devil { "ON" } else { "OFF" }),
+        format!("Team swap when switching: {}", if st.swap_team { "ON" } else { "OFF" }),
+        format!("Position probe: {}", if st.probe { "ON" } else { "OFF" }),
         "Close".to_string(),
     ];
     out.push_str("MOD MENU (Devil Within, branch devil/debug)\n");
@@ -286,8 +323,23 @@ pub fn update(m: &mut Machine, out: &mut String) {
         out.push_str(l);
         out.push('\n');
     }
-    if let Some((_, _, t, _)) = st.switched {
+    if let Some((_, _, t, _, _)) = st.switched {
         out.push_str(&format!("controlling: {}\n", name(m, t)));
+    }
+    if st.probe && cd != 0 {
+        // Candidate position fields of the character in control: the ones that follow its
+        // movement decide teleport / no-clip (DevilWithin.md).
+        let f = |a: u32| f32::from_bits(word(m, a));
+        out.push_str(&format!(
+            "probe cd={cd:#x}: mtx+0x30 {:.1} {:.1} {:.1} | yaw {:.3} | obj+0x16C {:.1} {:.1} {:.1}\n",
+            f(cd + 0xA0),
+            f(cd + 0xA4),
+            f(cd + 0xA8),
+            f(cd + 0x110),
+            f(p + 0x16C),
+            f(p + 0x170),
+            f(p + 0x174)
+        ));
     }
     if !st.last.is_empty() {
         out.push_str(&format!("{}\n", st.last));
