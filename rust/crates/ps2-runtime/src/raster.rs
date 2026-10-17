@@ -8,12 +8,6 @@
 use crate::gs::*;
 use rayon::prelude::*;
 
-/// Batches whose primitives cover more pixels than this are drawn by all cores, one screen
-/// tile per task (each tile runs the batch's primitives in order, clipped to the tile).
-const PARALLEL_PIXELS: i64 = 4096;
-/// Tile size in pixels.
-const TILE_W: i32 = 64;
-const TILE_H: i32 = 32;
 /// Most primitives queued before a flush.
 const MAX_BATCH: usize = 4096;
 
@@ -1101,94 +1095,11 @@ pub fn rect_blocks(psm: u32, bp: u32, bw: u32, x0: u32, y0: u32, x1: u32, y1: u3
     v
 }
 
-/// Whether a rectangle of a 32 / 16-bit buffer covers any of `blocks`: each block is mapped
-/// back to its pixel rectangle in that buffer (other formats: assumed to).
-fn rect_covers(psm: u32, bp: u32, bw: u32, r: (i32, i32, i32, i32), blocks: &[u32]) -> bool {
-    let bw = bw.max(1);
-    let (pw, ph, bxs, bys) = match psm {
-        PSMCT32 | PSMCT24 | PSMZ32 | PSMZ24 => (64, 32, 8, 8),
-        PSMCT16 | PSMCT16S | PSMZ16 | PSMZ16S => (64, 64, 16, 8),
-        _ => return true,
-    };
-    for &b in blocks {
-        let rel = b.wrapping_sub(bp) & 0x3FFF;
-        let page = rel / 32;
-        let mut bip = rel % 32;
-        if psm & 0x30 == 0x30 {
-            bip ^= 0x18;
-        }
-        // Inverse of the block layout tables.
-        let (cx, cy) = inv_block(psm, bip);
-        let px = (page % bw) * pw + cx * bxs;
-        let py = (page / bw) * ph + cy * bys;
-        let (px, py) = (px as i32, py as i32);
-        if px < r.2 && px + bxs as i32 > r.0 && py < r.3 && py + bys as i32 > r.1 {
-            return true;
-        }
-    }
-    false
-}
-
-/// (column, row) of block `bip` inside a page.
-fn inv_block(psm: u32, bip: u32) -> (u32, u32) {
-    use crate::gs::BLOCK32;
-    if matches!(psm, PSMCT16 | PSMCT16S | PSMZ16 | PSMZ16S) {
-        let t = if psm & 8 != 0 { &crate::gs::BLOCK16S } else { &crate::gs::BLOCK16 };
-        for (y, row) in t.iter().enumerate() {
-            for (x, &v) in row.iter().enumerate() {
-                if v == bip {
-                    return (x as u32, y as u32);
-                }
-            }
-        }
-        return (0, 0);
-    }
-    for (y, row) in BLOCK32.iter().enumerate() {
-        for (x, &v) in row.iter().enumerate() {
-            if v == bip {
-                return (x as u32, y as u32);
-            }
-        }
-    }
-    (0, 0)
-}
-
-/// Whether a raster batch (or transfer) in flight touches one of `blocks`.
-fn work_covers(work: &Work, blocks: &[u32]) -> bool {
-    if let Some(u) = work.upload.as_ref() {
-        // Exact: the blocks the transfer rectangle covers (page overlap alone over-orders).
-        let ub = rect_blocks(u.dpsm, u.dbp, u.dbw, u.dsax, u.dsay, u.dsax + u.rrw, u.dsay + u.rrh);
-        return ub.iter().any(|b| blocks.binary_search(b).is_ok());
-    }
-    if let Some(d) = work.decode.as_ref() {
-        return rect_covers(d.tex.psm, d.tbp, d.tbw, (0, 0, d.img.w as i32, d.img.h as i32), blocks);
-    }
-    if work.readout.is_some() {
-        return true;
-    }
-    if let Some(c) = work.clut.as_ref() {
-        let cb = clut_blocks(c.t);
-        return cb.iter().any(|b| blocks.binary_search(b).is_ok());
-    }
-    items_cover(&work.items, blocks)
-}
-
 /// The blocks a CSM1 CLUT load (TEX0 `t`) reads.
 pub fn clut_blocks(t: u64) -> Vec<u32> {
     let cbp = ((t >> 37) & 0x3FFF) as u32;
     let cpsm = ((t >> 51) & 0xF) as u32;
     rect_blocks(if cpsm == 0 { PSMCT32 } else { cpsm }, cbp, 1, 0, 0, 16, 16)
-}
-
-/// Whether one of the primitives covers one of `blocks` (frame, depth, direct texture).
-fn items_cover(items: &[Queued], blocks: &[u32]) -> bool {
-    items.iter().any(|q| {
-        let st = &*q.st;
-        let r = (q.bbox.x0, q.bbox.y0, q.bbox.x1, q.bbox.y1);
-        rect_covers(st.fpsm, st.fbp, st.fbw, r, blocks)
-            || (st.zte && rect_covers(st.zpsm, st.zbp, st.fbw, r, blocks))
-            || st.tex.as_ref().is_some_and(|t| t.direct.is_some() && rect_covers(t.psm, t.tbp, t.tbw, (0, 0, 1 << t.tw.min(10), 1 << t.th.min(10)), blocks))
-    })
 }
 
 /// A transfer chunk into pages batch `after` (or earlier ones) still uses: stored by worker 0
@@ -2064,16 +1975,6 @@ fn plot_fn(tme: bool, ate: bool, zte: bool, abe: bool, fge: bool) -> PlotFn {
         true true false false false, true true false false true, true true false true false, true true false true true,
         true true true false false, true true true false true, true true true true false, true true true true true
     )
-}
-
-/// A pixel outside the scissor rectangle is not drawn (spans are clipped already; points and
-/// lines check here).
-#[inline(always)]
-fn plot(gs: &mut Gs, st: &Setup, x: i32, y: i32, f: &Frag) {
-    if x < st.sx0 || x > st.sx1 || y < st.sy0 || y > st.sy1 || x < 0 || y < 0 || !owns_row(y) {
-        return;
-    }
-    (st.plot)(gs, st, x, y, f);
 }
 
 fn plot_g<const TME: bool, const ATE: bool, const ZTE: bool, const ABE: bool, const FGE: bool>(gs: &mut Gs, st: &Setup, x: i32, y: i32, f: &Frag) {

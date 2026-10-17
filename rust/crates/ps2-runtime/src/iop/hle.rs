@@ -848,7 +848,7 @@ pub fn rpc_request(m: &mut Machine, sid: u32, fno: u32, size: u32, recv: u32, re
     true
 }
 
-fn rpc_loop(m: &mut Machine, c: &mut Ctx, qd: u32) {
+fn rpc_loop(_m: &mut Machine, c: &mut Ctx, qd: u32) {
     loop {
         let m = crate::machine();
         let req = m.iop.exec.queues.get_mut(&qd).and_then(|q| q.1.pop_front());
