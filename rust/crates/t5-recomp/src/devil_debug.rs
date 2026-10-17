@@ -85,7 +85,7 @@ fn hook(m: &mut Machine) {
         return;
     }
     let mut text = overlay(m);
-    cheat_menu(m, &mut text);
+    crate::devil_mod::update(m, &mut text);
     if let Ok(mut t) = MENU_TEXT.lock() {
         if *t != text {
             *t = text;
@@ -371,84 +371,6 @@ fn map_viewer(m: &Machine, cur: i32) -> String {
          [no room geometry] = room models missing on the disc",
     );
     out
-}
-
-/// The "matty debug" tree (MATTY TEST, nodes from 0x356130, `mt_ndebug_util_list.c`): set up by
-/// 0x1CBFF8, but its driver (input / draw 0x1D8260, 0x1D88B0) is unreferenced in the retail
-/// build. Its entries as an in-game menu: (name string in the program, function, why not).
-/// Functions without arguments run through `kernel::request_guest_call`; the others need the
-/// removed tree view's context (auto-attack reads its node, the lists build tree views).
-const CHEATS: &[(u32, u32, &str)] = &[
-    (0x0040_EE38, 0x001D_92B0, ""),                                  // 30% health: life += max * k
-    (0x0040_EED8, 0x001D_9A78, ""),                                  // flags 0x200.. (5 x 8) = 1
-    (0x0040_EEF0, 0x001D_9AF0, ""),                                  // the same = 0
-    (0x0040_EE20, 0, "removed in the retail build"),                 // its function 0x1D93B8 is empty
-    (0x0040_EEB8, 0, "needs the removed debug tree view"),           // 0x1D9970(node)
-    (0x0040_EEC8, 0, "needs the removed debug tree view"),           // value node
-    (0x0040_EE58, 0, "needs the removed debug tree view"),           // 0x1D96B8 list view
-    (0x0040_EE70, 0, "needs the removed debug tree view"),
-    (0x0040_EE88, 0, "needs the removed debug tree view"),
-];
-
-/// Pad words of port 1 (0x2A9890 + 0x50: held).
-const PAD_HELD: u32 = 0x002A_98E0;
-const SELECT: u32 = 0x1;
-const UP: u32 = 0x10;
-const DOWN: u32 = 0x40;
-const L1: u32 = 0x400;
-const CIRCLE: u32 = 0x2000;
-
-/// In-game cheat menu: SELECT held + L1 opens / closes it, SELECT held + Up / Down chooses,
-/// SELECT held + CIRCLE runs the entry. Edges from the held word between vertical blanks.
-fn cheat_menu(m: &Machine, out: &mut String) {
-    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering::Relaxed};
-    static OPEN: AtomicBool = AtomicBool::new(false);
-    static CUR: AtomicUsize = AtomicUsize::new(0);
-    static PREV: AtomicU32 = AtomicU32::new(0);
-    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-    let held = word(m, PAD_HELD);
-    let new = held & !PREV.swap(held, Relaxed);
-    if held & SELECT != 0 && new & L1 != 0 {
-        OPEN.fetch_xor(true, Relaxed);
-    }
-    if !OPEN.load(Relaxed) {
-        return;
-    }
-    let mut cur = CUR.load(Relaxed);
-    if held & SELECT != 0 {
-        if new & UP != 0 {
-            cur = (cur + CHEATS.len() - 1) % CHEATS.len();
-        }
-        if new & DOWN != 0 {
-            cur = (cur + 1) % CHEATS.len();
-        }
-        if new & CIRCLE != 0 {
-            let (name, f, why) = CHEATS[cur];
-            let msg = if f != 0 {
-                ps2_runtime::kernel::request_guest_call(f);
-                ps2_runtime::diag::log(format!("devil: cheat menu runs {f:#x}"));
-                format!("ran: {}", cstr(m, name))
-            } else {
-                format!("not available: {why}")
-            };
-            if let Ok(mut l) = LAST.lock() {
-                *l = msg;
-            }
-        }
-    }
-    CUR.store(cur, Relaxed);
-    out.push_str("CHEAT MENU (matty debug)\n");
-    for (i, (name, f, _)) in CHEATS.iter().enumerate() {
-        let mark = if i == cur { "> " } else { "  " };
-        let note = if *f == 0 { "  [n/a]" } else { "" };
-        out.push_str(&format!("{mark}{}{note}\n", cstr(m, *name)));
-    }
-    if let Ok(l) = LAST.lock() {
-        if !l.is_empty() {
-            out.push_str(&format!("{l}\n"));
-        }
-    }
-    out.push_str("--\nhold SELECT (Tab) + Up/Down: entry   + CIRCLE (C): run   + L1: close\n\n");
 }
 
 fn overlay(m: &Machine) -> String {

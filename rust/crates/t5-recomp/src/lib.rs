@@ -12,6 +12,7 @@ pub fn disc_path() -> String {
 
 /// Create the machine (RAM, devices, the disc) and return what the front end shares with it.
 pub mod devil_debug;
+pub mod devil_mod;
 
 pub fn boot() -> ps2_runtime::Shared {
     ps2_runtime::diag::init("t5_trace.log");
