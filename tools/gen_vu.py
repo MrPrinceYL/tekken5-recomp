@@ -22,8 +22,11 @@ SHEET = ROOT / "sheets" / "vu_microcode.csv"
 BLOCKS = ROOT / "sheets" / "vu_blocks.csv"
 BCOLS = ["vu", "pc", "len", "key", "pairs", "mac_live", "shapes"]
 CRATE = ROOT / "rust" / "crates" / "t5-vu"
-# Crates the translated blocks are spread over (built in parallel).
-PARTS = 16
+# Crates the translated blocks are spread over (built in parallel). Each crate needs about
+# 12 MB of compiler memory per block at opt-level 3: 16 crates of ~250 blocks (3 GB each,
+# 16 at once on 16 cores) ran 32 GB PCs out of memory (17.10.). Keep blocks / PARTS <= ~100
+# (more blocks in the sheet -> raise PARTS, then run gen_rust.py: it lists the crates).
+PARTS = 48
 COLS = ["vu", "upper", "lower", "disasm"]
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
