@@ -258,6 +258,20 @@ Eine Suche über die gesamte Disc (Klartext) findet diese Namen nur in den Liste
 (`blu_A_002.pak`, Ereignis `gim_item_starblade_p00_000001` in `blu_A_002.evb`), leuchtende
 Gold-/Lebens-Items S/M/L.
 
+**Vorhandene, aber ungenutzte Figuren? (18.10., Nutzerfrage)** Alle 60 Figurenplätze aus
+`common/char_model_all.txt` gegen das Paketinventar und die Gebietsdateien geprüft:
+- Jin (0) und Devil Jin (7): Spielfigur, `base.pak`.
+- boss2 (1–4, Varianten), boss1 (56), boss3 (58), boss5 (59): je in ihrem Bossraum geladen.
+- Alle Gegnertypen `tk_*` (standard1/2, speed1, tricky1, power1/2) und `mon_*` (Monster:
+  standard1/2, speed1, tricky1, power1/2) haben Modelle **und** werden in Gebieten geladen
+  (tk_*: Labor A/B, Ägypten; mon_*: Ägypten, Blaue Ruinen A/B).
+- testchr1–3 (5, 6, 57): **keine** Daten.
+→ **Es gibt keine Figur, deren Daten vorhanden sind, die aber in keinem Level vorkommt.**
+Bei Objekten (Türen, Schlüssel, Kisten, Pendel …) lässt sich das per Namenssuche nicht sicher
+sagen: Platziert werden sie über Instanznamen (`gim_…_000001`) und `common/gim.db`, deren Format
+noch nicht entschlüsselt ist. Auffällig: Debug-Grundkörper `obj_obj_CUBE` / `obj_obj_SPHERE` in
+`base.pak` (der Code kennt `primitive_sphere` / `primitive_cylinder`).
+
 **Entwickler-Warpliste `area/mpl.txt` (81 Einträge, Index = MAP VIEWER):** 0–48 die fünf Gebiete
 (je Raum, Bossraum, Speicherraum), dazu Testkarten: `bgtest` 1–4 Musterkarten von Yamauchi
 (Labor, Ägypten, Blaue Ruinen und **„林サンプル“ = Wald**, ein Gebiet, das es im Spiel nicht gibt),
