@@ -37,7 +37,8 @@ which defaults to `E:\Decompilation\Game\Tekken 5 (USA).iso`.
   V = Triangle, Q / E = L1 / R1, 1 / 3 = L2 / R2, Enter = Start, Tab / Right Shift = Select.
   A second gamepad becomes the controller in port 2.
 - P opens the settings: volume, window mode, gamma, VSync, sharp or smooth picture, FPS counter
-  and optional faster disc loading. F1 shows the debug overlay. F11 or Alt+Enter toggles
+  and optional faster disc loading. F1 shows the debug overlay. Holding F3 fast-forwards (skips the
+  idle time between frames). F11 or Alt+Enter toggles
   borderless fullscreen.
 - Memory cards are folders (`memcard\port0`, `memcard\port1`; `T5_MEMCARD` moves them): every
   save file is an ordinary file there.

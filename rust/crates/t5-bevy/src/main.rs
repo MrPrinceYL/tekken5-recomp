@@ -68,7 +68,7 @@ fn main() {
         .insert_resource(settings::Settings::load())
         .init_resource::<settings::MenuState>()
         .add_systems(Startup, (setup, input::setup_menu, settings::setup, settings::setup_fps))
-        .add_systems(Update, (show_frame, input::read_input, input::menu, settings::menu, fps_counter, update_status, toggle_overlay))
+        .add_systems(Update, (show_frame, input::read_input, input::menu, settings::menu, fps_counter, update_status, toggle_overlay, fast_forward))
         .run();
 }
 
@@ -279,6 +279,11 @@ fn update_status(screen: Option<Res<Screen>>, mut q: Query<(&mut Text, &Visibili
     for (mut t, _) in &mut q {
         t.0 = s.clone();
     }
+}
+
+/// F3 held: skip the idle time between frames (fast forward, `ps2_runtime::WARP_KEY`).
+fn fast_forward(keys: Res<ButtonInput<KeyCode>>) {
+    ps2_runtime::WARP_KEY.store(keys.pressed(KeyCode::F3), Relaxed);
 }
 
 fn toggle_overlay(keys: Res<ButtonInput<KeyCode>>, mut q: Query<&mut Visibility, With<StatusText>>) {

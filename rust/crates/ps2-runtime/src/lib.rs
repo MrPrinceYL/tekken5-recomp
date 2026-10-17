@@ -67,6 +67,34 @@ pub const INTC_TIM0: u32 = 9;
 pub static VBLANKS: AtomicU64 = AtomicU64::new(0);
 pub static FRAMES: AtomicU64 = AtomicU64::new(0);
 
+/// Device time skipped while nothing was running (EE cycles, see `kernel::idle`).
+pub static WARP: AtomicU64 = AtomicU64::new(0);
+/// Fast-forward key held in the window.
+pub static WARP_KEY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Skip idle time now? `WARP_KEY` held, or `T5_WARP`: `1` = always, else device-second ranges
+/// `a-b,c-` (e.g. `0-70` = up to second 70, then real time).
+pub fn warp_on(now: u64) -> bool {
+    static RANGES: std::sync::OnceLock<Vec<(f64, f64)>> = std::sync::OnceLock::new();
+    let r = RANGES.get_or_init(|| {
+        let v = std::env::var("T5_WARP").unwrap_or_default();
+        if v.trim() == "1" {
+            return vec![(0.0, f64::MAX)];
+        }
+        v.split(',')
+            .filter_map(|p| p.split_once('-'))
+            .map(|(a, b)| (a.trim().parse().unwrap_or(0.0), b.trim().parse().unwrap_or(f64::MAX)))
+            .collect()
+    });
+    let s = now as f64 / EE_HZ as f64;
+    WARP_KEY.load(Relaxed) || r.iter().any(|&(a, b)| s >= a && s < b)
+}
+
+/// Device seconds since boot (the clock of `--press` and the timed diagnostics).
+pub fn secs() -> f64 {
+    machine_opt().map(|m| m.now() as f64 / EE_HZ as f64).unwrap_or(0.0)
+}
+
 /// One of the game's programs (generated from sheets/variants.csv).
 pub struct Program {
     pub name: &'static str,
@@ -259,7 +287,7 @@ impl Machine {
     #[inline]
     pub fn now(&self) -> u64 {
         let ns = self.start.elapsed().as_nanos();
-        ((ns * EE_HZ as u128 / 1_000_000_000) as u64).saturating_sub(self.skew)
+        ((ns * EE_HZ as u128 / 1_000_000_000) as u64 + WARP.load(Relaxed)).saturating_sub(self.skew)
     }
 
     /// Request an INTC interrupt; delivered at the next service point.

@@ -30,11 +30,11 @@ pub fn run() -> ! {
 /// T5_HOLD seconds (default 0.5), counted from `script::init`.
 pub mod script {
     use std::sync::OnceLock;
-    use std::time::Instant;
 
-    static SCRIPT: OnceLock<(Instant, f64, Vec<(u16, f64)>)> = OnceLock::new();
+    static SCRIPT: OnceLock<(f64, Vec<(u16, f64)>)> = OnceLock::new();
 
-    /// Read the presses from the command line and start the clock; false when there are none.
+    /// Read the presses from the command line (seconds of device time, `ps2_runtime::secs`, so
+    /// they keep their place under `T5_WARP`); false when there are none.
     pub fn init(args: &[String]) -> bool {
         let mut presses = Vec::new();
         for w in args.windows(2).filter(|w| w[0] == "--press") {
@@ -55,14 +55,14 @@ pub mod script {
         // T5_HOLD=<seconds>: how long a press is held (menus repeat when held long).
         let hold = std::env::var("T5_HOLD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5);
         let some = !presses.is_empty();
-        let _ = SCRIPT.set((Instant::now(), hold, presses));
+        let _ = SCRIPT.set((hold, presses));
         some
     }
 
     /// The scripted buttons held right now.
     pub fn held() -> u16 {
-        let Some((t0, hold, presses)) = SCRIPT.get() else { return 0 };
-        let t = t0.elapsed().as_secs_f64();
+        let Some((hold, presses)) = SCRIPT.get() else { return 0 };
+        let t = ps2_runtime::secs();
         presses.iter().filter(|(_, at)| t >= *at && t < at + hold).fold(0, |a, (b, _)| a | b)
     }
 }

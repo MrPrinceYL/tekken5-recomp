@@ -1984,7 +1984,7 @@ thread_local! {
 
 fn capture_start(m: &mut Machine, pc: u32) -> bool {
     let from: u64 = std::env::var("T5_VUCAPTURE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-    if m.start.elapsed().as_secs() < from || CAPTURED.load(std::sync::atomic::Ordering::Relaxed) >= CAPTURE_RUNS {
+    if m.now() / crate::EE_HZ < from || CAPTURED.load(std::sync::atomic::Ordering::Relaxed) >= CAPTURE_RUNS {
         return false;
     }
     let v = &m.vu1;

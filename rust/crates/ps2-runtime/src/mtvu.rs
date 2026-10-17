@@ -198,6 +198,11 @@ impl Mtvu {
         self.shared.done.load(Acquire) < self.sent
     }
 
+    /// Nothing queued, running or waiting to be applied (warp may skip ahead).
+    pub fn quiet(&self) -> bool {
+        !self.busy() && self.shared.finished.lock().unwrap().is_empty() && self.shared.stall_regs.lock().unwrap().is_none()
+    }
+
     /// VIF1 FBRST (releases a stall).
     pub fn fbrst(&self, v: u32) {
         crate::diag::count_with(|| format!("mtvu_fbrst_sent_{v:x}"));

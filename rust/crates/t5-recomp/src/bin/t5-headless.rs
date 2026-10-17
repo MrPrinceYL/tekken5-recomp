@@ -3,6 +3,7 @@
 //!
 //! Usage: t5-headless [seconds] [out_dir] [--press BUTTON@SECOND ...]
 //! (BUTTON: START, CROSS, CIRCLE, UP, DOWN, LEFT, RIGHT; held for half a second.)
+//! Seconds are device time: `T5_WARP=1` (or ranges, `ps2_runtime::warp_on`) skips idle time.
 
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -34,7 +35,7 @@ fn main() {
     let prof = std::env::var("T5_PROFILE").ok().and_then(|v| v.parse::<u64>().ok()).map(|start| {
         let span = secs.saturating_sub(start).max(1);
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(start));
+            wait_secs(start as f64);
             t5_recomp::profile::run(span)
         })
     });
@@ -44,13 +45,13 @@ fn main() {
         let frames = shared.frames.clone();
         let out = out.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(start));
+            wait_secs(start as f64);
             let mut seen = 0;
             let mut buf = ps2_runtime::gs::Frame::default();
-            let end = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            let end = start as f64 + 1.0;
             let mut i = 0;
             let mut kept = Vec::new();
-            while std::time::Instant::now() < end {
+            while ps2_runtime::secs() < end {
                 let n = frames.take_if_new(seen, &mut buf);
                 if n != seen {
                     seen = n;
@@ -66,7 +67,7 @@ fn main() {
         });
     }
     for s in 1..=secs {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        wait_secs(s as f64);
         // T5_RAMSNAP=<s1>,<s2>,...: EE RAM dumps at those seconds (finding game variables).
         if let Ok(v) = std::env::var("T5_RAMSNAP") {
             if v.split(',').any(|x| x.trim().parse::<u64>().ok() == Some(s)) {
@@ -96,4 +97,12 @@ fn main() {
         }
     }
     std::process::exit(0);
+}
+
+/// Sleep until the device clock reaches `t` seconds (all times here are device time, so a run
+/// under `T5_WARP` does the same at the same game moments, only sooner).
+fn wait_secs(t: f64) {
+    while ps2_runtime::secs() < t {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
 }

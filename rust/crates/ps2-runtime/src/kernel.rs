@@ -418,7 +418,13 @@ fn idle() {
         next = next.min(a.due);
     }
     next = next.min(crate::iop::next_event(m)).min(crate::sif::next_event(m)).min(crate::timers::next_event(m));
-    if next > now {
+    // Warp: jump to the event instead of waiting for it, but only when the MTVU worker has
+    // nothing left (its results would otherwise land late in device time).
+    let quiet = || m.mtvu.as_ref().map_or(true, |t| t.quiet()) && crate::mtvu::RAISED.load(Relaxed) == 0;
+    if next > now && crate::warp_on(now) && quiet() {
+        crate::WARP.fetch_add(next - now, Relaxed);
+        crate::diag::tl("EE warp");
+    } else if next > now {
         let ns = ((next - now) as u128 * 1_000_000_000 / crate::EE_HZ as u128) as u64;
         crate::diag::tl("EE idle");
         let t0 = std::time::Instant::now();

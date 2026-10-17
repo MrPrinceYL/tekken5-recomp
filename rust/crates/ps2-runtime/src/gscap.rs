@@ -34,7 +34,7 @@ pub fn on_cmd(gs: &Gs, cap: &mut Option<Capture>, armed: &mut bool, c: &GsCmd) {
     }
     if cap.is_none() {
         let from: u64 = std::env::var("T5_GSCAPTURE").ok().and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
-        let started = crate::machine_opt().map(|m| m.start.elapsed().as_secs() >= from).unwrap_or(false);
+        let started = crate::secs() >= from as f64;
         if !started || !matches!(c, GsCmd::Vsync { .. }) {
             return;
         }
