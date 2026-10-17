@@ -53,7 +53,7 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         die Flare-Primitive im Stream? dann EE-Entscheidung; RAM-Diff mit `T5_RAMSNAP`).
 
 ## P4 Programme
-- [ ] B12 Devil Within: Schwarzbild, hängt.
+- [ ] B12 Devil Within, Tekken 1 Arcade History, Tekken 2 Arcade History, Tekken 3 Arcade History: Schwarzbild, hängt.
 
 ## Selbst gefunden
 - [x] S0 **Fehlende EE-Funktionen** 0x2EE660 / 0x2EE6A0 / 0x2EE6E0: virtuelle Methoden (Aufruf per
