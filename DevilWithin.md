@@ -272,6 +272,44 @@ sagen: Platziert werden sie über Instanznamen (`gim_…_000001`) und `common/gi
 noch nicht entschlüsselt ist. Auffällig: Debug-Grundkörper `obj_obj_CUBE` / `obj_obj_SPHERE` in
 `base.pak` (der Code kennt `primitive_sphere` / `primitive_cylinder`).
 
+**Namen der Gegner/Bosse (18.10.):** Es gibt keine Anzeigenamen (`common/char_prof.bin` = nur
+interne Kennungen `chr_…`, Texte im Spiel sind Schrift-Grafiken `cap_teg_msg_font_*`). Zuordnung über
+die Soundsets (Paket → Raum):
+| Kennung | Soundset | Bedeutung |
+|---|---|---|
+| boss1 (`kmb1`, Labor A) | `snd_c_boss` | allgemeiner Boss-Satz |
+| boss2 (Labor B, Varianten A–D) | `snd_c15hei` | **Heihachi**-Sounds, Heihachi/Kazuya-Bewegungen |
+| boss3 | `snd_c_03_ogre` | **Ogre** |
+| Arena Gebiet 4 | `snd_c_04_iseki` („iseki“ = Ruine; Einträge ISEKI_001…, `KOWASI` = zerstören) | Ruinen-Arena |
+| boss5 | `snd_c_05_ogre` (+ `METAMO`) | **True Ogre** (Verwandlung) |
+| `tk_*` (Labor A/B, Ägypten) | `snd_c_tks` + `snd_c21jac` / `c_jac_f` | Soldaten mit **Jack**-Sounds |
+| `mon_*` (Ägypten, Ruinen) | `snd_c_monst` | Monster |
+| Jin / Devil Jin | `snd_c10jin` / `snd_c30dvj` | Spielfigur |
+Varianten heißen intern standard1/2, speed1, tricky1, power1/2, je in Stufen lv1–lv4.
+Nebenbei: Der Code kennt sechs Sprachen (ENGLISH, DEUTSCH, FRANCAIS, ESPANOL, ITALIANO, BRITISH) und
+Boot-Pakete boot_jp/us/du/fr/es/it/uk/ko; auf der US-Disc liegt nur `boot_us`.
+
+**Aufnehmbare Items (Platzierungen `gim_item_*` in allen `.evb`/`.evd` gegen die Modelle):**
+platziert sind `item_collect` (83×), Gold S/M/L, Leben S/M, StarBlade (Raum 4-2). **Nie platziert**,
+aber als Modell vorhanden: `item_life_L` (großes Lebens-Item, `base.pak`) und alle „luminous“-
+Varianten (Gold/Leben S/M/L). Ob der Code sie als Beute erzeugt (der Code rechnet Gold aus der Stufe
+der Gegner, 0x148F20), ist **nicht belegt**. Test-Items `itm_testA` fehlen ganz.
+
+**Objekte, die nie platziert werden** (Modell in einem Paket, kein `.evb`/`.evd` nennt es):
+`BossStage04_B` und `BossStage04_barrier` (im Paket des Bossraums 4-5, während Kern, Kristalle und
+Satelliten dort platziert sind), Varianten `p01 a00/a01` der Schlüssel-/Siegeltüren (lab, egy, blu),
+`blu_boxA_mov_p00_a00`, Pfahl-Varianten `poleC … a01`, `default_effect_test`, `default_luminous_test`
+(nur Makino-Testraum), Debug-Grundkörper CUBE/SPHERE. Dynamisch erzeugt und daher nicht ungenutzt:
+Figuren, Boss-Effekte `BossEffNN`, Kartensymbole `map_*`, Zielmarker `lockonMarker`, Schatten.
+
+**MATTY TEST = Cheat-/Debug-Menü „matty debug“** (Baumansicht „Treeview“, Knoten à 0x30 Byte ab
+0x356130; `mt_ndebug_util_list.c`): Zweig **CHEAT** mit „GIM: Gold Passport“ (Funktion 0x1D93B8,
+im Release **geleert**) und „体力30％回復“ = **30 % Leben auffüllen** (0x1D92B0, **funktioniert**: Leben
++ Max × Faktor), Zweig „DEBUG matty“ mit global flag / register / system register list,
+**auto-attack** (MT_DEBUG_AUTO_ATTACK 0x1D9970), „impact STR hack“, „Set / Clear COLLECT flags“;
+dazu Einträge FORCE MENU, PAUSE MENU, STAGE RESULT, TOTAL RESULT, MAIN MENU. Die Zeichenfunktion
+(0x1CBF70) ist wie alle Debug-Ausgaben ohne Text → im Overlay noch nicht sichtbar (nächster Schritt).
+
 **Entwickler-Warpliste `area/mpl.txt` (81 Einträge, Index = MAP VIEWER):** 0–48 die fünf Gebiete
 (je Raum, Bossraum, Speicherraum), dazu Testkarten: `bgtest` 1–4 Musterkarten von Yamauchi
 (Labor, Ägypten, Blaue Ruinen und **„林サンプル“ = Wald**, ein Gebiet, das es im Spiel nicht gibt),
