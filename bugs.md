@@ -124,6 +124,11 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
         Devil Within einige Minuten spielen → `rust\vu_dumps\shapes.txt`), dann
         `gen_vu.py --collect-shapes`, `gen_vu.py`, neu bauen. Ob das allein für 60 reicht, ist
         nicht gemessen.
+      - Gesammelt (Nutzer, Fenster, 17.10.): 177 Shapes, davon nur 8 neu → die von Devil
+        Within genutzten Blöcke hatten fast alle schon Shapes; die Annahme „fehlende Shapes“
+        erklärt die ~21 ns/Paar NICHT. Nutzertest der fps offen. Nächster Schritt, falls
+        weiter 30: Worker-Profil (`T5_PROFILE` + `T5_PROFILE_MTVU`, gibt es nur in
+        t5-headless → Nutzer fragen).
 
 ## Selbst gefunden
 - [x] S0 **Fehlende EE-Funktionen** 0x2EE660 / 0x2EE6A0 / 0x2EE6E0: virtuelle Methoden (Aufruf per
