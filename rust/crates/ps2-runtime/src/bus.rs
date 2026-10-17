@@ -119,7 +119,10 @@ pub fn io_read(c: &mut Ctx, addr: u32, size: usize) -> u128 {
         0x1000_7000..=0x1000_701F => crate::ipu::fifo_read(m, a),
         0x1000_4000..=0x1000_6FFF => 0,
         0x1000_8000..=0x1000_EFFF => crate::dmac::read(m, a) as u128,
-        0x1000_F000 => m.istat as u128,
+        0x1000_F000 => {
+            crate::kernel::poll_istat(m);
+            m.istat as u128
+        }
         0x1000_F010 => m.imask as u128,
         0x1000_F200..=0x1000_F2FF => crate::sif::hw_read(m, a) as u128,
         0x1000_F520 => m.dmac.enable as u128,

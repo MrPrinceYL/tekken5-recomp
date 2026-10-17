@@ -409,22 +409,50 @@ fn maybe_preempt() {
     }
 }
 
-/// No thread is ready: let time pass until something happens.
-fn idle() {
-    let m = machine();
-    let now = m.now();
+/// Device time of the next scheduled event (vblank, alarm, IOP, SIF, timer).
+fn next_event(m: &Machine) -> u64 {
     let mut next = m.next_vblank.min(if m.in_vblank { m.vblank_end } else { u64::MAX });
     for a in &m.kernel.alarms {
         next = next.min(a.due);
     }
-    next = next.min(crate::iop::next_event(m)).min(crate::sif::next_event(m)).min(crate::timers::next_event(m));
-    // Warp: jump to the event instead of waiting for it, but only when the MTVU worker has
-    // nothing left (its results would otherwise land late in device time).
-    let quiet = || m.mtvu.as_ref().map_or(true, |t| t.quiet()) && crate::mtvu::RAISED.load(Relaxed) == 0;
-    if next > now && crate::warp_on(now) && quiet() {
+    next.min(crate::iop::next_event(m)).min(crate::sif::next_event(m)).min(crate::timers::next_event(m))
+}
+
+/// Warp: jump to the next event instead of waiting for it, but only when the MTVU worker has
+/// nothing left (its results would otherwise land late in device time).
+fn try_warp(m: &Machine, now: u64, next: u64) -> bool {
+    let quiet = m.mtvu.as_ref().map_or(true, |t| t.quiet()) && crate::mtvu::RAISED.load(Relaxed) == 0;
+    if next > now && crate::warp_on(now) && quiet {
         crate::WARP.fetch_add(next - now, Relaxed);
         crate::diag::tl("EE warp");
-    } else if next > now {
+        return true;
+    }
+    false
+}
+
+/// INTC_STAT read: the same value many times in a row is a wait loop (libkernl `VSync` polls
+/// it with interrupts off, 0x10F830) - as idle as a parked thread, so warp skips it too.
+pub fn poll_istat(m: &Machine) {
+    static POLL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let last = POLL.load(Relaxed);
+    let n = if last >> 32 == m.istat as u64 { (last & 0xFFFF_FFFF) + 1 } else { 0 };
+    POLL.store((m.istat as u64) << 32 | n, Relaxed);
+    if n >= 8 {
+        let now = m.now();
+        if try_warp(m, now, next_event(m)) {
+            // The next service point raises what is now due.
+            ATTENTION.store(true, Relaxed);
+            POLL.store((m.istat as u64) << 32, Relaxed);
+        }
+    }
+}
+
+/// No thread is ready: let time pass until something happens.
+fn idle() {
+    let m = machine();
+    let now = m.now();
+    let next = next_event(m);
+    if !try_warp(m, now, next) && next > now {
         let ns = ((next - now) as u128 * 1_000_000_000 / crate::EE_HZ as u128) as u64;
         crate::diag::tl("EE idle");
         let t0 = std::time::Instant::now();
