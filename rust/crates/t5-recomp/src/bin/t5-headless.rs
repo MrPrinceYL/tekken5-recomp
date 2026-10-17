@@ -49,7 +49,8 @@ fn main() {
         pad.buttons[0].store(held, std::sync::atomic::Ordering::Relaxed);
         std::thread::sleep(std::time::Duration::from_millis(10));
     });
-    // T5_PROFILE=<start>: sample the guest thread from that second to the end.
+    // T5_PROFILE=<start>: sample the guest thread from that second to the end (Windows only).
+    #[cfg(windows)]
     let prof = std::env::var("T5_PROFILE").ok().and_then(|v| v.parse::<u64>().ok()).map(|start| {
         let span = secs.saturating_sub(start).max(1);
         std::thread::spawn(move || {
@@ -108,6 +109,7 @@ fn main() {
             ps2_runtime::UNKNOWN_TARGETS.load(Relaxed)
         );
     }
+    #[cfg(windows)]
     if let Some(p) = prof {
         if let Ok(h) = p.join() {
             t5_recomp::profile::report(h);
