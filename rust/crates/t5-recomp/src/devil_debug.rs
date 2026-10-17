@@ -108,9 +108,17 @@ fn cstr(m: &Machine, a: u32) -> String {
     (0..64).map(|i| ram_read(m, a + i, 1) as u8).take_while(|&b| b != 0).map(|b| b as char).collect()
 }
 
+/// Controls, from the menus' input code (pad words at 0x2A98E0..: libpad bits, 0x10 up, 0x40
+/// down, 0x2000 circle, 0x4000 cross; keys = t5-bevy's default bindings). The developer menu
+/// (0x103038) selects with circle only, SUBMENU (0x1324B8) with circle or cross; neither has a
+/// "back": the developer menu waits in state 2 until the started mode's task ends (0x103038),
+/// then shows itself again.
+const DEV_HINT: &str = "Steuerkreuz hoch/runter (Pfeiltasten): Eintrag waehlen\nKREIS (Taste C): starten\nZurueck: endet ein Modus, kommt dieses Menue wieder";
+const SUB_HINT: &str = "Steuerkreuz hoch/runter (Pfeiltasten): Eintrag waehlen\nKREIS (Taste C) oder KREUZ (Taste X): starten";
+
 /// One menu: title line, then its entries (null entries skipped by the game too), the cursor's
-/// entry marked.
-fn menu(m: &Machine, title: &str, table: u32, cursor: u32, end: u32, out: &mut String) {
+/// entry marked, then the controls.
+fn menu(m: &Machine, title: &str, table: u32, cursor: u32, end: u32, hint: &str, out: &mut String) {
     out.push_str(title);
     out.push('\n');
     for i in 0..64 {
@@ -125,7 +133,9 @@ fn menu(m: &Machine, title: &str, table: u32, cursor: u32, end: u32, out: &mut S
         let mark = if i == cursor { "> " } else { "  " };
         out.push_str(&format!("{mark}{}\n", cstr(m, word(m, e + 4))));
     }
-    out.push('\n');
+    out.push_str("--\n");
+    out.push_str(hint);
+    out.push_str("\n\n");
 }
 
 fn menu_text(m: &Machine) -> String {
@@ -138,13 +148,13 @@ fn menu_text(m: &Machine) -> String {
         let f = word(m, t + 0x20);
         let state = word(m, t + 0x34);
         if f == DEV_MENU_FN && state == 1 {
-            menu(m, "DEVELOPER MENU", word(m, t + 0x38), word(m, t + 0x40), DEV_MENU_END, &mut out);
+            menu(m, "DEVELOPER MENU", word(m, t + 0x38), word(m, t + 0x40), DEV_MENU_END, DEV_HINT, &mut out);
         } else if f == SUBMENU_FN && state == 0 {
             let title = match word(m, t + 0x3C) {
                 0 => "SUBMENU".to_string(),
                 a => cstr(m, a),
             };
-            menu(m, &title, word(m, t + 0x38), word(m, t + 0x40), 0, &mut out);
+            menu(m, &title, word(m, t + 0x38), word(m, t + 0x40), 0, SUB_HINT, &mut out);
         }
         t = word(m, t + 0x18);
     }

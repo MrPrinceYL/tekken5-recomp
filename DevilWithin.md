@@ -113,6 +113,14 @@ Menüs aus dem Gast-RAM (Task-Pool 0x2A9A30, Kette über +0x18): Entwicklermenü
 Titel +0x3C, Cursor +0x40). t5-bevy zeigt den Text oben links (`DebugMenuText`), nur mit
 `T5_DW_DEBUG`. Ersetzt die entfernte Ausgabe, ändert keinen Spielzustand. Nutzertest offen.
 
+**Steuerung (aus dem Eingabecode, Pad-Wörter ab 0x2A98E0, libpad-Bits):** hoch 0x10 / runter
+0x40 (Steuerkreuz), **Entwicklermenü wählt nur mit KREIS (0x2000)**, SUBMENU mit KREIS oder
+KREUZ (0x4000). Kein „Zurück“: das Entwicklermenü wartet in Zustand 2, bis die Task des
+gestarteten Modus endet, und erscheint dann wieder. Die ursprüngliche Tastenkombination fürs
+Entwicklermenü war **SELECT halten + START** (0x103038 am Ende: Pad 0x2A98E0 & 1 und 0x2A98E4 & 8,
+dann der geleerte Aufruf 0x103670). Auf dem Titel (0x103288) setzt START+SELECT halten auf den
+Titel zurück. Das Overlay zeigt die Tasten unter jedem Menü (Tastatur: C = Kreis, X = Kreuz).
+
 ## 3. Dateiverzeichnis (Testinhalte, ungenutzte Dateien)
 
 Devil Within liest seine Daten aus `cd:tk5data2.bin` über ein eingebautes Verzeichnis:
