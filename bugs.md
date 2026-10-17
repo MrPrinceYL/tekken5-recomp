@@ -19,7 +19,12 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
       Konfig-Abfrage beantwortet (DualShock 2), 1 erst nach 10 Fehlversuchen. libpad
       `scePadInfoMode(CUREXID)` (0x10C648) liefert bei 1 → 0, die Pad-Statusmaschine des Spiels
       (0x239658) ruft dann nie `scePadSetMainMode(analog)` auf, und 0x239500 setzt die Sticks
-      im Digitalmodus fest auf 0x80. Fix: modeConfig = 2 (`iop/pad.rs`). Nutzertest offen.
+      im Digitalmodus fest auf 0x80. Fix: modeConfig = 2 (`iop/pad.rs`). Nutzer: T5 + Sticks ok.
+      - Folgefehler: StarBlade / Devil Within danach ganz ohne Tasten. Sie gehen jetzt den
+        Analog-Weg (SetMainMode, EnterPressMode = SetButtonInfo, SetActAlign); libpad liest das
+        Ergebnis je Kommando woanders (0x06/0x08 → +0x14, 0x0A → +0x10, 0x0B → +0x1C,
+        0x14 → +0x08, sonst +0x0C), die HLE schrieb immer +0x0C → Devil Within (0x22A910)
+        blieb vor scePadRead stehen. Fix: Ergebnis an die gelesene Stelle. Nutzertest offen.
 
 ## P2 Ton
 - [x] B4 Kampf: keine Musik. (Nutzer 17.10.: Musik da)

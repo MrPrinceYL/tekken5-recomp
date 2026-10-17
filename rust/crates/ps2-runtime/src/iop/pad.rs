@@ -1,6 +1,6 @@
 //! padman (RPC 0x80000100 / 0x80000101) for libpad 3.0 (SLUS 0x0010B900..0x0010CE68): commands
-//! in a 0x80-byte buffer (word 0 command, +4 port, +8 slot, +0x10 argument; reply word 3 result,
-//! word 5 extra), and per open port two 0x80-byte `pad_data` records in EE memory that padman
+//! in a 0x80-byte buffer (word 0 command, +4 port, +8 slot, +0x10 argument; the result word
+//! depends on the command, see the end of `call`), and per open port two 0x80-byte `pad_data` records in EE memory that padman
 //! rewrites every frame, alternating, with a growing frame count (libpad reads the newer one).
 //!
 //! pad_data: +0x00 data[32] (the controller's reply: 0x00, mode id, buttons (active low),
@@ -74,7 +74,15 @@ pub fn call(m: &mut Machine, sid: u32, d: &[u8], recv: usize) -> Reply {
             _ => diag::once(format!("pad: command {cmd:#x}")),
         }
     }
-    set(&mut r, 0x0C, result);
+    // Where libpad reads each command's result (main 0x10BD58.., devil 0x2615A0..).
+    let at = match cmd {
+        0x06 | 0x08 => 0x14,
+        0x0A => 0x10,
+        0x0B => 0x1C,
+        0x14 => 0x08,
+        _ => 0x0C,
+    };
+    set(&mut r, at, result);
     Reply::Now(r)
 }
 
