@@ -218,8 +218,9 @@ def collect(dump_dir):
 
 def write_if_changed(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists() or path.read_text() != text:
-        path.write_text(text)
+    # CRLF on every platform (as written on Windows), so Linux and Windows output is identical.
+    if not path.exists() or path.read_bytes() != text.replace("\n", "\r\n").encode():
+        path.write_text(text, newline="\r\n")
 
 
 def generate():
