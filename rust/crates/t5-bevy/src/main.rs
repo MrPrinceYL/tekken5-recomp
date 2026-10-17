@@ -48,8 +48,25 @@ fn main() {
     std::thread::Builder::new()
         .name("ps2-ee".into())
         .stack_size(512 << 20)
-        .spawn(|| t5_recomp::run())
+        .spawn(|| {
+            #[cfg(windows)]
+            t5_recomp::profile::mark_guest();
+            t5_recomp::run()
+        })
         .expect("spawn guest thread");
+    // T5_PROFILE=<second>: sample a thread (T5_PROFILE_MTVU / _GS / _RASTER, else the guest)
+    // for T5_PROFILE_SECS (default 30) seconds from that game second on; result in t5_trace.log.
+    #[cfg(windows)]
+    if let Some(start) = std::env::var("T5_PROFILE").ok().and_then(|v| v.parse::<f64>().ok()) {
+        let span = std::env::var("T5_PROFILE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30);
+        std::thread::spawn(move || {
+            while ps2_runtime::secs() < start {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            ps2_runtime::diag::log(format!("profile: sampling {span} s"));
+            t5_recomp::profile::report(t5_recomp::profile::run(span));
+        });
+    }
     // Measurement runs: `--press BUTTON@SECOND` as in t5-headless.
     t5_recomp::script::init(&std::env::args().collect::<Vec<_>>());
     start_audio(shared.audio.clone());

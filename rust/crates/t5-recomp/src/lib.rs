@@ -218,14 +218,14 @@ pub mod profile {
             let mut v: Vec<_> = by_line.into_iter().collect();
             v.sort_by(|a, b| b.1.cmp(&a.1));
             for (name, n) in v.iter().take(60) {
-                eprintln!("[profile-line] {:5.1}% {name}", *n as f64 * 100.0 / total.max(1) as f64);
+                ps2_runtime::diag::log(format!("[profile-line] {:5.1}% {name}", *n as f64 * 100.0 / total.max(1) as f64));
             }
         }
         let mut v: Vec<_> = by_fn.into_iter().collect();
         v.sort_by(|a, b| b.1.cmp(&a.1));
-        eprintln!("[profile] {total} samples");
+        ps2_runtime::diag::log(format!("[profile] {total} samples"));
         for (name, n) in v.iter().take(40) {
-            eprintln!("[profile] {:5.1}% {name}", *n as f64 * 100.0 / total.max(1) as f64);
+            ps2_runtime::diag::log(format!("[profile] {:5.1}% {name}", *n as f64 * 100.0 / total.max(1) as f64));
         }
     }
 }
