@@ -159,7 +159,7 @@ erfinden). Tasten aus dem Eingabecode des jeweiligen Modus (Pad-Wörter 0x2A98E0
 
 Werkzeuge haben keinen Zurück-Weg im Code; das Entwicklermenü wartet, bis die Task des Modus endet.
 
-**Overlay** (`devil_debug::overlay`): zeigt jedes offene Menü (Einträge, Cursor, `[entfernt]`,
+**Overlay** (`devil_debug::overlay`, Texte auf Englisch, Nutzerwunsch 18.10.): zeigt jedes offene Menü (Einträge, Cursor, `[entfernt]`,
 `[haengt]`) und jeden laufenden Modus aus der Tabelle mit aktuellen Werten und Tasten.
 
 **Reparatur (nur mit `T5_DW_DEBUG`):** Nach dem Ende eines Modus zeigt sich das Entwicklermenü
@@ -208,14 +208,14 @@ hatte in TK5DATA0/1/5 gesucht.) Entpacken: `tools/dw_extract.py <iso> <extracted
 | lab_A | 1 研究室A (Labor A) | 1-5 ボス | boss1 (`kmb1`: Maschinengewehr, Schrotflinte, Sprungschuss) |
 | lab_B | 2 研究室B (Labor B) | 2-5 ボス | boss2 (Bewegungen aus Heihachi/Kazuya-Sätzen: `hei`, `he`, `kz`) |
 | egy_A | 3 エジプトA (Ägypten A) | 3-5 ボス | boss3 = **Ogre** (Soundset `c_03_ogre`) |
-| blu_A | 4 蒼い遺跡A (Blaue Ruinen A) | 4-5 ボス | **kein Boss**: nur sechs normale Monstertypen |
+| blu_A | 4 蒼い遺跡A (Blaue Ruinen A) | 4-5 ボス | Arena-Boss `BossStage04` (Kern, Kristalle, Satelliten, Barriere) + Monsterwellen |
 | blu_B | 5 蒼い遺跡B (Blaue Ruinen B) | 5-5 ボス | boss3 (Ogre) und danach boss5 = **True Ogre** (Soundset `c_05_ogre` mit `METAMO` = Verwandlung, `bhb_ai_boss5_lv1/lv2`, `bhb_mo_boss5_start2`) |
 
-- **Fehlender Boss 4:** Die Entwickler-Warpliste nennt für jedes der fünf Gebiete einen
-  Bossraum („x-5 ボス“). In Gebiet 4 (blu_A) steht dort keine Boss-KI, kein `init_obj_boss4`, keine
-  Liste `chr_boss4`, kein Modellplatz in `common/char_model_all.txt`. Die Nummerierung 1, 2, 3, 5
-  und der leere Bossraum in Gebiet 4 sprechen für einen **gestrichenen vierten Boss**. Daten davon
-  sind auf der Disc nicht vorhanden, er lässt sich also nicht wiederherstellen.
+- **Boss von Gebiet 4 (korrigiert 18.10.):** Der Bossraum 4-5 hat keinen Figuren-Boss, aber eine
+  Boss-Arena: `blu_A_005.pak` enthält `obj_bg_blu_BossStage04_C_00`, Kern (`Core`), Kristalle
+  (`Cry`), Satelliten (`Sat`), Barriere und Trefferzone `hitBossStage04_A`, und `blu_A_005.evb`
+  setzt sie ein (dazu Monsterwellen). Die Nummerierung boss1/2/3/5 ohne boss4 passt dazu: Boss 4
+  ist das Arena-Objekt. Die frühere Vermutung „gestrichener Boss 4“ ist damit **widerlegt**.
 - **Ogres:** Es gibt nur **zwei** Ogre-Kämpfe (Ogre = boss3, True Ogre = boss5). Der Code lädt nur
   `common/ogre3.shd` und `ogre5.shd` (0x113A18, mit `simple.shd`, `tkchr.shd`). `ogre2.nud/.shd`,
   `ogre3.nud`, `ogre5.nud` und `ogre_shd.shd` lädt weder Code noch eine Liste → **Überbleibsel**.
@@ -232,6 +232,32 @@ hatte in TK5DATA0/1/5 gesucht.) Entpacken: `tools/dw_extract.py <iso> <extracted
 - **Abspann:** `staffroll2.txt` lädt `asb/ast_staffroll_test.dat` (Test-Abspann).
 - `script/DEBUG/*/readme.txt`: „script data for ai“ usw.
 
+**Paketformat BDPK** (Prüfung 0x109F80, Einträge 0x10A5A8): Kopf 0x80 Byte (+4 Anzahl), dann je
+0x80 Byte {`BD`, Typ u16, u32, Größe, ?, Offset, Name[0x6C]} – Namen ohne `.dat`. Inventar aller
+Pakete: 1022 Einträge (`extracted/dw_pak_inventory.txt`, nicht in Git).
+
+**Verlangt, aber auf der Disc nicht vorhanden** (Listen `.txt` gegen Paketinventar; die `nut_`-
+Dateien ausgenommen, die nicht einzeln verpackt sind):
+- **Testfiguren testchr1–3:** Modelle und Startobjekte (`obj_obj_testchr*`, `gym_init_obj_testchr*`).
+- **Ogre (boss3):** die Bewegungen `gym_Jb2_horn00`, `Jb2_tail01`, `Mb2_kamae`, `Pb2_snep2`,
+  `Pb2_wpat`, `Yb2_FIRE2` (Horn, Schwanz, Feuer) stehen in `egy_A/boss.txt`, fehlen aber →
+  gestrichene Ogre-Angriffe. **True Ogre:** KI `bhb_ai_boss5_lv2` fehlt (nur lv1 vorhanden).
+  boss2: Bewegung `gym_ozhe_1ckj66a` fehlt.
+- **Skripte:** `bhb_ai_enemy00`, `bhb_mo_hero`, **`bhb_mo_multi_start`** (Mehrspieler-Start?),
+  alle Testkarten-Skripte (bgtest, kondoh, matty, szk).
+- **Testkarten:** keine Dateien für bgtest (inkl. Wald), effect, kondoh, matty, mine, szk; die
+  `chr`-Testräume haben zwar Listen, aber ihre Raumgeometrie (`obj_bg_lab_roomC…`,
+  `obj_bg_*_roomA/B…`) fehlt → nicht sinnvoll ladbar. Der Makino-Testraum (`makino_001.pak`) ist
+  vollständig und enthält das Objekt `obj_obj_default_luminous_test`.
+- **Gimmicks:** Schlüssel/Siegel-Türen, Zäune, Pfähle, Pendel, `lab_pathAnimJack`, Testobjekte
+  `itm_testA`, `default_testA`, `matty_moving_floor…` (nur in den Testlisten).
+- **Test-Abspann** `asb/ast_staffroll_test`.
+Eine Suche über die gesamte Disc (Klartext) findet diese Namen nur in den Listen selbst.
+
+**Vorhanden und im normalen Spiel genutzt:** StarBlade-Item `obj_obj_item_starblade_p00_d00`
+(`blu_A_002.pak`, Ereignis `gim_item_starblade_p00_000001` in `blu_A_002.evb`), leuchtende
+Gold-/Lebens-Items S/M/L.
+
 **Entwickler-Warpliste `area/mpl.txt` (81 Einträge, Index = MAP VIEWER):** 0–48 die fünf Gebiete
 (je Raum, Bossraum, Speicherraum), dazu Testkarten: `bgtest` 1–4 Musterkarten von Yamauchi
 (Labor, Ägypten, Blaue Ruinen und **„林サンプル“ = Wald**, ein Gebiet, das es im Spiel nicht gibt),
@@ -242,8 +268,8 @@ Dateien gibt es nur für `chr` und `makino` (plus die fünf Gebiete); die übrig
 (darunter der Wald) fehlen auf der Disc.
 
 **Im Spiel testen:** `T5_DW_DEBUG=dev` → MAKINO MENU → MAP VIEWER. Das Overlay zeigt die Warpliste
-mit deutschen Namen und markiert Karten ohne Daten mit `[Daten fehlen]`. Ladbar sind die Gebiete,
-die `chr`-Testräume (Index 53–57) und der Makino-Testraum (61).
+mit englischen Namen und markiert Karten ohne Daten mit `[no data]` (bzw. `[no room geometry]` für die chr-Räume). Vollständig ladbar sind die fünf Gebiete und der Makino-Testraum (61); den `chr`-Testräumen
+(53–57) fehlt die Raumgeometrie.
 
 ## 4. Noch nicht untersucht
 - Inhalte der Textdateien (Dialoge, ungenutzte Texte) – hängt am Archiv (Abschnitt 3).

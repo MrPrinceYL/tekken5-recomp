@@ -19,7 +19,7 @@
 //! nothing), so menus and tools would run invisibly. `overlay` reads the open menus and the
 //! running tools from guest memory every vertical blank for the front end (`MENU_TEXT`): the
 //! entries, the cursor, the tools' current values and their controls (read from each tool's
-//! input code, DevilWithin.md), in place of the removed output.
+//! input code, DevilWithin.md), in place of the removed output. The overlay text is English.
 //!
 //! One repair, also only with T5_DW_DEBUG: an entry whose code the retail build emptied
 //! (`jr ra`) returns at once; the developer menu then shows itself again with its entry count
@@ -129,8 +129,8 @@ fn cstr(m: &Machine, a: u32) -> String {
         return b.iter().map(|&c| c as char).collect();
     }
     match b.as_slice() {
-        [0x8A, 0x4A, 0x94, 0xAD, 0x83, 0x82, 0x81, 0x5B, 0x83, 0x68] => "KAIHATSU MODE (Entwicklermodus)".into(),
-        _ => "(japanischer Text)".into(),
+        [0x8A, 0x4A, 0x94, 0xAD, 0x83, 0x82, 0x81, 0x5B, 0x83, 0x68] => "KAIHATSU MODE (developer mode)".into(),
+        _ => "(Japanese text)".into(),
     }
 }
 
@@ -143,11 +143,11 @@ fn emptied(m: &Machine, f: u32) -> bool {
 // +8 repeat; libpad bits: 0x10 up, 0x20 right, 0x40 down, 0x80 left, 0x100 L2, 0x200 R2,
 // 0x400 L1, 0x800 R1, 0x1000 triangle, 0x2000 circle, 0x4000 cross, 0x8000 square, 8 start,
 // 1 select, 4 R3; analog sticks at 0x2A98A0). Keys: t5-bevy's default keyboard bindings.
-const DEV_HINT: &str = "Hoch/Runter (Pfeiltasten): Eintrag   KREIS (C): starten\n\
-     [entfernt] = Code im Release geloescht, startet nichts\n\
-     [haengt] = startet einen leeren Modus, nur Neustart hilft\n\
-     Kein Zurueck: endet ein Modus, kommt dieses Menue wieder";
-const SUB_HINT: &str = "Hoch/Runter (Pfeiltasten): Eintrag   KREIS (C) oder KREUZ (X): starten";
+const DEV_HINT: &str = "Up/Down (arrow keys): entry   CIRCLE (C): start\n\
+     [removed] = code deleted in the retail build, starts nothing\n\
+     [hangs] = starts an empty mode, only a restart helps\n\
+     No back button: when a mode ends, this menu returns";
+const SUB_HINT: &str = "Up/Down (arrow keys): entry   CIRCLE (C) or CROSS (X): start";
 
 /// One menu: title line, then its entries (null entries skipped by the game too), the cursor's
 /// entry marked, then the controls.
@@ -165,9 +165,9 @@ fn menu(m: &Machine, title: &str, table: u32, cursor: u32, end: u32, hint: &str,
         }
         let mark = if i == cursor { "> " } else { "  " };
         let note = if emptied(m, f) {
-            "  [entfernt]"
+            "  [removed]"
         } else if HANGS.contains(&f) {
-            "  [haengt]"
+            "  [hangs]"
         } else {
             ""
         };
@@ -184,63 +184,63 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
     Some(match f {
         // MODEL VIEW 0x108F10, update 0x1092B8: state +0x34 0 = model list (0x1091B0), 1 = view.
         0x0010_92B8 if s(0x34) == 0 => format!(
-            "MODEL VIEW - Modellliste\nEintrag {} (Modell-ID {})\n--\n\
-             Hoch/Runter: Modell   KREIS (C) oder START (Enter): anzeigen   VIERECK (Z): Hintergrund",
+            "MODEL VIEW - model list\nEntry {} (model id {})\n--\n\
+             Up/Down: model   CIRCLE (C) or START (Enter): view   SQUARE (Z): background",
             s(0x148),
             s(0x3C)
         ),
         0x0010_92B8 => format!(
-            "MODEL VIEW - Ansicht (Modell-ID {})\n--\n\
-             Linker Stick: verschieben   Rechter Stick: drehen\n\
-             L1 / R1 (gehalten): naeher / weiter   KREIS halten: schneller\n\
-             L2 / R2: Wert -/+ (0x2B849C)   DREIECK (V): Anzeige umschalten\n\
-             VIERECK (Z): Hintergrund   START (Enter): Kamera zuruecksetzen\n\
-             KREUZ (X) oder SELECT (Tab): zurueck zur Liste",
+            "MODEL VIEW - view (model id {})\n--\n\
+             Left stick: move   Right stick: rotate\n\
+             L1 / R1 (held): closer / farther   hold CIRCLE: faster\n\
+             L2 / R2: value -/+ (0x2B849C)   TRIANGLE (V): toggle display\n\
+             SQUARE (Z): background   START (Enter): reset camera\n\
+             CROSS (X) or SELECT (Tab): back to the list",
             s(0x3C)
         ),
         // SOUND TEST 0x133BC0, update 0x133CE8.
         0x0013_3CE8 => format!(
-            "SOUND TEST\nBank {} (0-20)   Ton {}\n--\n\
-             Links/Rechts: Bank   Hoch/Runter: Ton\n\
-             KREIS (C) halten: Ton spielen   KREUZ (X): Ton stoppen\n\
-             VIERECK (Z): Bank laden   DREIECK (V): alle Stimmen aus",
+            "SOUND TEST\nBank {} (0-20)   Sound {}\n--\n\
+             Left/Right: bank   Up/Down: sound\n\
+             hold CIRCLE (C): play   CROSS (X): stop sound\n\
+             SQUARE (Z): load bank   TRIANGLE (V): all voices off",
             s(0x38),
             s(0x3C)
         ),
         // STREAM TEST 0x1344F8 (EVENT_STREAM_TEST), update 0x1346A0.
         0x0013_46A0 => format!(
-            "STREAM TEST\nStream {} von {}   Lautstaerke {:.2}\n--\n\
-             Hoch/Runter: Stream (KREIS halten: 10er-Schritte)   Links/Rechts: Lautstaerke\n\
-             KREIS / DREIECK / VIERECK: abspielen (Variante 0 / 1 / 2)\n\
-             KREUZ (X): stoppen   SELECT (Tab): stoppen (sofort)   START (Enter): Pause an/aus",
+            "STREAM TEST\nStream {} of {}   Volume {:.2}\n--\n\
+             Up/Down: stream (hold CIRCLE: steps of 10)   Left/Right: volume\n\
+             CIRCLE / TRIANGLE / SQUARE: play (variant 0 / 1 / 2)\n\
+             CROSS (X): stop   SELECT (Tab): stop (at once)   START (Enter): pause on/off",
             s(0x3C),
             s(0x38),
             f32::from_bits(word(m, t + 0x4C))
         ),
         // TEXTURE VIEWER 0x109A70, update 0x109AF0 / 0x109B78.
         0x0010_9AF0 => format!(
-            "TEXTURE VIEWER\nPosition {:#x}   Ansicht {}   Speicher {}\n--\n\
-             Links/Rechts: blaettern (DREIECK halten: x256, KREIS halten: x16)\n\
-             KREUZ (X): Ansicht (0-3)   R1: Speicherbereich (0-7)",
+            "TEXTURE VIEWER\nPosition {:#x}   View {}   Memory {}\n--\n\
+             Left/Right: browse (hold TRIANGLE: x256, hold CIRCLE: x16)\n\
+             CROSS (X): view (0-3)   R1: memory area (0-7)",
             s(0x34),
             word(m, 0x0041_AF6C),
             word(m, 0x0041_AF70)
         ),
         // OPTION TEST 0x105E30, update 0x105E98: records the directions and cross.
-        0x0010_5E98 => "OPTION TEST (Eingabetest)\n--\n\
-             Steuerkreuz und KREUZ (X) werden registriert (Anzeige im Release entfernt)"
+        0x0010_5E98 => "OPTION TEST (input test)\n--\n\
+             D-pad and CROSS (X) are recorded (display removed in the retail build)"
             .to_string(),
         // MAP VIEWER 0x108D60, update 0x108DC8: KREIS loads the map if it exists (0x125F60) into
         // EVENT_SAMPLE_MODE.
         0x0010_8DC8 => map_viewer(m, s(0x34)),
         // EVENT_SAMPLE_MODE 0x106728 (map loaded from MAP VIEWER / SOUND 3D TEST), 0x107F30 /
         // 0x108120: free camera.
-        0x0010_7F30 => "KARTE (EVENT_SAMPLE_MODE, freie Kamera)\n--\n\
-             Linker Stick: bewegen   Rechter Stick: drehen   R2 / L2: hoch / runter\n\
-             KREIS halten: schneller   VIERECK halten: Spezialansicht   R3: zuruecksetzen"
+        0x0010_7F30 => "MAP (EVENT_SAMPLE_MODE, free camera)\n--\n\
+             Left stick: move   Right stick: turn   R2 / L2: up / down\n\
+             hold CIRCLE: faster   hold SQUARE: special view   R3: reset"
             .to_string(),
         // CHAR PROFILE LIST 0x120478, update 0x1204B8.
-        0x0012_04B8 => format!("CHAR PROFILE LIST\nZeile {}\n--\nHoch/Runter: blaettern", s(0x34)),
+        0x0012_04B8 => format!("CHAR PROFILE LIST\nRow {}\n--\nUp/Down: scroll", s(0x34)),
         // STAGE SELECT / SELECT DEVIL / EXTRA-DEBUG 0x103DC8 (+0x40 mode 1 / 5 / 7), update
         // 0x103E88: state 1 stage +0x3C (0-4, 5 = back), state 2 value +0x38 (0-3, 0x103B00,
         // stored by 0x105BD0 in 0x2AD58C).
@@ -252,20 +252,20 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
             };
             if s(0x34) == 2 {
                 format!(
-                    "{what} - Stage {}\nStufe {} (0-3)\n--\n\
-                     Hoch/Runter: Stufe   KREIS (C): starten (Controller 1 oder 2)   KREUZ (X): zurueck",
+                    "{what} - stage {}\nLevel {} (0-3)\n--\n\
+                     Up/Down: level   CIRCLE (C): start (controller 1 or 2)   CROSS (X): back",
                     s(0x3C),
                     s(0x38)
                 )
             } else {
                 let st = s(0x3C);
-                let name = if st == 5 { "zurueck".to_string() } else { st.to_string() };
-                format!("{what}\nStage {name} (0-4, 5 = zurueck)\n--\nHoch/Runter: Stage   KREIS (C): weiter")
+                let name = if st == 5 { "back".to_string() } else { st.to_string() };
+                format!("{what}\nStage {name} (0-4, 5 = back)\n--\nUp/Down: stage   CIRCLE (C): next")
             }
         }
         // NEW GAME / NEW GAME(DEVIL) 0x103B70 / 0x103BC0 (NEWGAME START), update 0x103C10.
         0x0010_3C10 => format!(
-            "NEW GAME\nStufe {} (0-3)\n--\nHoch/Runter: Stufe   KREIS (C): starten (Controller 1 oder 2)",
+            "NEW GAME\nLevel {} (0-3)\n--\nUp/Down: level   CIRCLE (C): start (controller 1 or 2)",
             s(0x38)
         ),
         _ => return None,
@@ -277,36 +277,37 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
 /// Shift-JIS).
 const MPL_TABLE: u32 = 0x0041_B558;
 const MPL_COUNT: u32 = 0x0041_B55C;
-/// Areas with files in TK5DATA2 (the program's directory 0x362900); the other entries of the
-/// list (bgtest, effect, kondoh, matty, mine, szk) name test maps whose data is not on the disc.
-const AREAS_ON_DISC: &[&str] = &["lab_A", "lab_B", "egy_A", "blu_A", "blu_B", "chr", "makino"];
+/// Areas with complete files in TK5DATA2 (the program's directory 0x362900, packs checked
+/// against their lists, DevilWithin.md). `chr` has lists and scripts but not its room geometry;
+/// the other entries (bgtest, effect, kondoh, matty, mine, szk) name test maps with no files.
+const AREAS_ON_DISC: &[&str] = &["lab_A", "lab_B", "egy_A", "blu_A", "blu_B", "makino"];
 
-/// German for the Japanese words of the warp list labels (Shift-JIS, longest first).
+/// English for the Japanese words of the warp list labels (Shift-JIS, longest first).
 const MPL_WORDS: &[(&[u8], &str)] = &[
-    (b"\x83\x47\x83\x74\x83\x46\x83\x4e\x83\x67\x8c\x9f\x8f\xd8\x97\x70\x83\x7d\x83\x62\x83\x76\x83\x66\x81\x5b\x83\x5e", "Effekt-Pruefkarte"),
-    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x83\x82\x83\x93\x83\x58\x83\x5e\x81\x5b", "Figurentest Monster"),
-    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x83\x66\x83\x55\x81\x5b\x83\x67", "Figurentest Desert"),
-    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x93\x53\x8c\x9d", "Figurentest Tekken"),
-    (b"\x83\x4c\x83\x83\x83\x89\x83\x4e\x83\x5e\x81\x5b\x8c\x9f\x8f\xd8\x97\x70", "Figuren-Pruefraum"),
-    (b"\x83\x4c\x83\x83\x83\x89\x83\x4e\x83\x5e\x81\x5b\x83\x65\x83\x58\x83\x67", "Figurentest"),
-    (b"\x91\x93\x82\xa2\x88\xe2\x90\xd5\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster Blaue Ruinen "),
-    (b"\x83\x47\x83\x57\x83\x76\x83\x67\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster Aegypten "),
-    (b"\x8c\xa4\x8b\x86\x8e\xba\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster Labor "),
-    (b"\x97\xd1\x83\x54\x83\x93\x83\x76\x83\x8b", "Muster WALD (kein Gebiet im Spiel) "),
-    (b"\x97\x86\x90\xf9\x8a\x4b\x92\x69\x83\x65\x83\x58\x83\x67", "Wendeltreppen-Test "),
-    (b"\x81\x40\x83\x5a\x81\x5b\x83\x75\x95\x94\x89\xae", " Speicherraum"),
-    (b"\x96\x71\x96\xec\x83\x65\x83\x58\x83\x67", "Makino-Test "),
-    (b"\x95\x89\x89\xd7\x83\x65\x83\x58\x83\x67", "Lasttest "),
-    (b"\x81\x40\x91\x93\x82\xa2\x88\xe2\x90\xd5", " Blaue Ruinen "),
-    (b"\x8e\x52\x93\xe0\x83\x65\x83\x58\x83\x67", "Yamauchi-Test"),
-    (b"\x95\x89\x89\xd7\x8c\x9f\x8f\xd8\x97\x70", "Lastpruefung"),
-    (b"\x83\x65\x83\x58\x83\x67\x95\x94\x89\xae", "Testraum "),
-    (b"\x81\x40\x83\x47\x83\x57\x83\x76\x83\x67", " Aegypten "),
-    (b"\x81\x40\x8c\xa4\x8b\x86\x8e\xba", " Labor "),
+    (b"\x83\x47\x83\x74\x83\x46\x83\x4e\x83\x67\x8c\x9f\x8f\xd8\x97\x70\x83\x7d\x83\x62\x83\x76\x83\x66\x81\x5b\x83\x5e", "effect check map"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x83\x82\x83\x93\x83\x58\x83\x5e\x81\x5b", "character test monster"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x83\x66\x83\x55\x81\x5b\x83\x67", "character test desert"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x65\x83\x58\x83\x67\x81\x40\x93\x53\x8c\x9d", "character test Tekken"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x4e\x83\x5e\x81\x5b\x8c\x9f\x8f\xd8\x97\x70", "character check room"),
+    (b"\x83\x4c\x83\x83\x83\x89\x83\x4e\x83\x5e\x81\x5b\x83\x65\x83\x58\x83\x67", "character test"),
+    (b"\x91\x93\x82\xa2\x88\xe2\x90\xd5\x83\x54\x83\x93\x83\x76\x83\x8b", "sample Blue Ruins "),
+    (b"\x83\x47\x83\x57\x83\x76\x83\x67\x83\x54\x83\x93\x83\x76\x83\x8b", "sample Egypt "),
+    (b"\x8c\xa4\x8b\x86\x8e\xba\x83\x54\x83\x93\x83\x76\x83\x8b", "sample Laboratory "),
+    (b"\x97\xd1\x83\x54\x83\x93\x83\x76\x83\x8b", "sample FOREST (no such area in the game) "),
+    (b"\x97\x86\x90\xf9\x8a\x4b\x92\x69\x83\x65\x83\x58\x83\x67", "spiral staircase test "),
+    (b"\x81\x40\x83\x5a\x81\x5b\x83\x75\x95\x94\x89\xae", " save room"),
+    (b"\x96\x71\x96\xec\x83\x65\x83\x58\x83\x67", "Makino test "),
+    (b"\x95\x89\x89\xd7\x83\x65\x83\x58\x83\x67", "load test "),
+    (b"\x81\x40\x91\x93\x82\xa2\x88\xe2\x90\xd5", " Blue Ruins "),
+    (b"\x8e\x52\x93\xe0\x83\x65\x83\x58\x83\x67", "Yamauchi test"),
+    (b"\x95\x89\x89\xd7\x8c\x9f\x8f\xd8\x97\x70", "load check"),
+    (b"\x83\x65\x83\x58\x83\x67\x95\x94\x89\xae", " test room "),
+    (b"\x81\x40\x83\x47\x83\x57\x83\x76\x83\x67", " Egypt "),
+    (b"\x81\x40\x8c\xa4\x8b\x86\x8e\xba", " Laboratory "),
     (b"\x81\x40\x83\x7b\x83\x58", " BOSS"),
-    (b"\x97\x86\x90\xf9", " Spirale"),
+    (b"\x97\x86\x90\xf9", " spiral"),
     (b"\x8e\x52\x93\xe0", "Yamauchi"),
-    (b"\x83\x65\x83\x58\x83\x67", "Test"),
+    (b"\x83\x65\x83\x58\x83\x67", "test"),
     (b"\x81\x69", "("),
     (b"\x81\x6a", ")"),
     (b"\x81\xa5", ""),
@@ -325,9 +326,9 @@ fn mpl_label(m: &Machine, a: u32) -> String {
             i += 1;
             continue;
         }
-        for (jp, de) in MPL_WORDS {
+        for (jp, en) in MPL_WORDS {
             if b[i..].starts_with(jp) {
-                out.push_str(de);
+                out.push_str(en);
                 i += jp.len();
                 continue 'next;
             }
@@ -338,27 +339,35 @@ fn mpl_label(m: &Machine, a: u32) -> String {
     out
 }
 
-/// MAP VIEWER: the warp list around the cursor, with the labels in German and the test maps
-/// whose data is missing marked.
+/// MAP VIEWER: the warp list around the cursor, labels in English, test maps without data
+/// marked.
 fn map_viewer(m: &Machine, cur: i32) -> String {
     let table = word(m, MPL_TABLE);
     let count = int(m, MPL_COUNT);
-    let mut out = format!("MAP VIEWER (Warp-Liste area/mpl.txt, {count} Eintraege)\n");
+    let mut out = format!("MAP VIEWER (warp list area/mpl.txt, {count} entries)\n");
     if table == 0 || count <= 0 {
-        out.push_str("Liste nicht geladen\n");
+        out.push_str("List not loaded\n");
     }
     for i in (cur - 6).max(0)..(cur + 7).min(count) {
         let e = table + i as u32 * 0x50;
         let area = cstr(m, e);
         let mark = if i == cur { "> " } else { "  " };
-        let missing = if AREAS_ON_DISC.contains(&area.as_str()) { "" } else { "  [Daten fehlen]" };
+        let missing = match area.as_str() {
+            a if AREAS_ON_DISC.contains(&a) => "",
+            "chr" => "  [no room geometry]",
+            _ => "  [no data]",
+        };
         out.push_str(&format!(
             "{mark}{i:2} {area} {} - {}{missing}\n",
             ram_read(m, e + 0xE, 2) as u16,
             mpl_label(m, e + 0x30).trim()
         ));
     }
-    out.push_str("--\nHoch/Runter: Karte   KREIS (C): laden\n[Daten fehlen] = Testkarte ohne Dateien auf der Disc, nicht laden");
+    out.push_str(
+        "--\nUp/Down: map   CIRCLE (C): load\n\
+         [no data] = test map without files on the disc, do not load\n\
+         [no room geometry] = room models missing on the disc",
+    );
     out
 }
 
