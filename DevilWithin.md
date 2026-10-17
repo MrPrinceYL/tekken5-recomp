@@ -121,6 +121,52 @@ Entwicklermenü war **SELECT halten + START** (0x103038 am Ende: Pad 0x2A98E0 & 
 dann der geleerte Aufruf 0x103670). Auf dem Titel (0x103288) setzt START+SELECT halten auf den
 Titel zurück. Das Overlay zeigt die Tasten unter jedem Menü (Tastatur: C = Kreis, X = Kreuz).
 
+## 2a. Alle Einträge geprüft (17.10.)
+
+Jede Menüfunktion aus den Tabellen 0x2AD610, 0x2B8170, 0x2B8198, 0x2B8438 gelesen. „Entfernt“ =
+Funktion besteht nur aus `jr ra; nop` (Code im Release gelöscht, nicht rekonstruierbar ohne zu
+erfinden). Tasten aus dem Eingabecode des jeweiligen Modus (Pad-Wörter 0x2A98E0 gehalten,
++4 gedrückt, +8 Wiederholung; Sticks 0x2A98A0).
+
+| Eintrag | Funktion | Ergebnis |
+|---|---|---|
+| MAKINO MENU | 0x108EE8 | Untermenü (Tabelle 0x2B8438, = Werkzeugliste) |
+| SHUJI TEST | 0x15FFF8 | **entfernt** |
+| HASHI TEST | 0x1F7F88 | Task „HASHI_TEST_MENU“, alle Callbacks `jr ra` → endet nie, Menü wartet ewig (**hängt**) |
+| MATTY TEST | 0x1CBFF8 | Task „MATTY_MENU“ nur mit Zeichenfunktion 0x1CBF70, L1 beim Start = Variante; ungeprüft, ob nutzbar |
+| KONDOH TEST | 0x20A320 | **entfernt** |
+| CHARA VIEW | 0x160000 | **entfernt** |
+| MODEL VIEW | 0x108F10 | funktioniert: Liste (hoch/runter, Kreis/START) → Ansicht (Sticks, L1/R1 Zoom, L2/R2 Wert 0x2B849C, Dreieck/Viereck Umschalter, START Kamera, Kreuz/SELECT zurück) |
+| STREAM TEST | 0x1344F8 | funktioniert, braucht Liste 0x405D60: hoch/runter Stream (Kreis = 10er), links/rechts Lautstärke, Kreis/Dreieck/Viereck abspielen, Kreuz/SELECT stoppen, START Pause |
+| GAME LOAD START | 0x10D5E8 | GAME MODE + Startzustand 8 |
+| TITLE(Debug) / TITLE(Release) | 0x1038B0 / 0x103888 | Debug- / normales Titelmenü |
+| BASE_PAK RELOAD | 0x106648 | lädt base.pak neu (Task 0x106690), keine Eingabe |
+| MPL RELOAD | 0x125D18 | lädt Gebietsliste neu, sofort |
+| GAME MODE | 0x10D4E8 | normales Spiel („GAME MAIN“), übernimmt DEBUG ON (Task+0x52) als +0x5C |
+| DEBUG OFF / DEGUG ON | 0x103720 / 0x103740 | Task+0x52 = 0 / 1 |
+| OPTIONS / OPTION TEST | 0x105E30 | Eingabetest: registriert Steuerkreuz + Kreuz (Anzeige entfernt) |
+| 開発モード (Kaihatsu-Modus) | 0x103768 | ruft den geleerten Auslöser 0x103670 → tut nichts |
+| NEW GAME / NEW GAME(DEVIL) | 0x103B70 / 0x103BC0 | Stufe 0–3 (hoch/runter), Kreis startet (Controller 1 oder 2) |
+| CONTINUE / LOAD GAME | 0x103CB8 / 0x103D58 | Spielstand fortsetzen / laden |
+| STAGE SELECT / SELECT DEVIL / EXTRA-DEBUG | 0x103E40/58/70 → 0x103E88 | Stage 0–4 (5 = zurück), Kreis → Stufe 0–3, Kreis startet (Modus 1 / 5 / 7), Kreuz zurück |
+| MAP VIEWER | 0x108D60 | Karte hoch/runter, Kreis lädt (nur vorhandene) → EVENT_SAMPLE_MODE: freie Kamera (Sticks, R2/L2 hoch/runter, Kreis schneller, R3 Reset) |
+| SOUND TEST | 0x133BC0 | Bank links/rechts (0–20), Ton hoch/runter, Kreis halten spielen, Kreuz stopp, Viereck Bank laden, Dreieck alle aus |
+| SOUND 3D TEST | 0x106948 | lädt EVENT_SAMPLE_MODE (wie MAP VIEWER) |
+| TEXTURE VIEWER | 0x109A70 | links/rechts blättern (Dreieck x256, Kreis x16), Kreuz Ansicht 0–3, R1 Speicher 0–7 |
+| CHAR PROFILE LIST | 0x120478 | hoch/runter blättern |
+| PAD VIBRATION TEST | 0x102CB0 | **entfernt** |
+| RANK SETTING | 0x10EA40 | **entfernt** |
+
+Werkzeuge haben keinen Zurück-Weg im Code; das Entwicklermenü wartet, bis die Task des Modus endet.
+
+**Overlay** (`devil_debug::overlay`): zeigt jedes offene Menü (Einträge, Cursor, `[entfernt]`,
+`[haengt]`) und jeden laufenden Modus aus der Tabelle mit aktuellen Werten und Tasten.
+
+**Reparatur (nur mit `T5_DW_DEBUG`):** Nach dem Ende eines Modus zeigt sich das Entwicklermenü
+mit Eintragsanzahl 0 (0x102FD8 löscht +0x3C, gezählt wird nur in Zustand 0, den der ungenutzte
+Wiedereinstieg 0x1034A0 auslösen würde) → nächstes hoch/runter = Endlosschleife 0x1031E8
+(Nutzerbericht: Hänger nach CHARA VIEW). Der Hook setzt dann Zustand 0 (neu zählen), wie 0x1034A0.
+
 ## 3. Dateiverzeichnis (Testinhalte, ungenutzte Dateien)
 
 Devil Within liest seine Daten aus `cd:tk5data2.bin` über ein eingebautes Verzeichnis:
