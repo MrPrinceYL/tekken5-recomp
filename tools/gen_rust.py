@@ -48,6 +48,7 @@ SHEETS, RUST = ROOT / "sheets", ROOT / "rust"
 CRATES = RUST / "crates"
 PREFIX = "t5"
 PART_INSTR = int(os.environ.get("T5_PART_INSTR", "30000"))
+IDENT_MAX = 0x1000  # program image bytes kept for identification
 
 VN = re.compile(r"([CRUMX])([0-9a-f]+):(\d+)")
 BIN = {
@@ -580,17 +581,34 @@ def gen_variant(v, funcs, hle_rows):
         crates.append(crate)
         dirs.append(f"crates/recomp/{name}/part_{n:02}")
         print(f"  {crate}: {len(part)} functions, {sum(len(by_func[e]) for e in part)} instructions", flush=True)
-    # Identification: the program image bytes at its entry point (the runtime matches RAM).
+    # The program image from its entry point on (identification, see `idents`).
     entry = int(v["entry"], 16)
-    ident = b""
+    image = b""
     for r in memory_rows:
         a = int(r["addr"], 16)
         raw = bytes.fromhex(r["hex"])
-        if a <= entry < a + len(raw) or (ident and len(ident) < 64):
-            ident += raw[max(0, entry - a):] if not ident else raw
-        if len(ident) >= 64:
+        if a <= entry < a + len(raw) or image:
+            image += raw[max(0, entry - a):] if not image else raw
+        if len(image) >= IDENT_MAX:
             break
-    return crates, dirs, names, entries, ident[:64], by_func
+    return crates, dirs, names, entries, image[:IDENT_MAX], by_func
+
+
+def idents(progs):
+    """Per program, the image bytes the runtime matches in RAM at its entry point: at least 64,
+    and as many as it takes to differ from every other program's image at that address
+    (tekken1 and tekken2 share entry point and crt0)."""
+    out = []
+    for v, _, _, img in progs:
+        e = int(v["entry"], 16)
+        others = [w_img[e - int(w["entry"], 16):] for w, _, _, w_img in progs
+                  if w is not v and 0 <= e - int(w["entry"], 16) < len(w_img)]
+        n = 64
+        while any(o[:n] == img[:n] for o in others if len(o) >= n):
+            n += 4
+            assert n <= len(img), f"{v['variant']}: no unique identification within {IDENT_MAX} bytes"
+        out.append(img[:n])
+    return out
 
 
 def main():
@@ -610,6 +628,7 @@ def main():
         all_crates += crates
         all_dirs += dirs
         progs.append((v, crates, names, ident))
+    progs = [(v, c, n, i) for (v, c, n, _), i in zip(progs, idents(progs))]
 
     import gen_iop
     iop_crates, iop_dirs = gen_iop.generate(CRATES, PART_OPT)
