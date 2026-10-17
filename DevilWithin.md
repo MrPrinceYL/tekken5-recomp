@@ -85,6 +85,9 @@ PowerShell:
 $env:T5_DW_DEBUG = "title"   # oder "dev"
 .\play.bat
 ```
+Erkennung: Devil Within startet per Sprung des Programmladers (kein ExecPS2), das aktuelle
+Programm bleibt „loader“ → der Schalter sucht das Devil-Bild im RAM (`Machine::in_ram`). Erster
+Nutzertest scheiterte genau daran (normales Menü).
 Status: gebaut (`cargo check`), **im Spiel noch ungetestet**. Offen: ob die Menütexte sichtbar
 sind (Debug-Schrift) und welche Testmodi ohne Entwicklerdateien (`sim:`/`host`) laufen.
 

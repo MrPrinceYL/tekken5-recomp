@@ -46,7 +46,10 @@ pub fn install() {
 fn hook(m: &mut Machine) {
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     static DONE: AtomicBool = AtomicBool::new(false);
-    if m.program().map(|p| p.name) != Some("devil") {
+    // Devil Within is entered by a jump of the program loader, not ExecPS2: the current program
+    // stays "loader", so look for its image in RAM (as the dispatcher does).
+    let running = m.programs.iter().find(|p| p.name == "devil").is_some_and(|p| m.in_ram(p));
+    if !running {
         DONE.store(false, Relaxed);
         return;
     }
