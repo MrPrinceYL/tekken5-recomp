@@ -97,7 +97,7 @@ pub fn summary(m: &crate::Machine) {
         }
     }
     log(format!("GS display: pmode {:#x} dispfb1 {:#x} display1 {:#x} dispfb2 {:#x} display2 {:#x} smode2 {:#x} bg {:#x}", m.gs.pmode, m.gs.dispfb[0], m.gs.display[0], m.gs.dispfb[1], m.gs.display[1], m.gs.smode2, m.gs.bgcolor));
-    log(format!("VU pairs in last period: VU0 {} VU1 {} (cycles {} / {})", crate::vu::VU_STEPS[0].swap(0, Relaxed), crate::vu::VU_STEPS[1].swap(0, Relaxed), crate::vu::VU_CYCLES[0].swap(0, Relaxed), crate::vu::VU_CYCLES[1].swap(0, Relaxed)));
+    log(format!("VU pairs in last period: VU0 {} VU1 {} (cycles {} / {}) | XGKICK {} ms ({} kicks)", crate::vu::VU_STEPS[0].swap(0, Relaxed), crate::vu::VU_STEPS[1].swap(0, Relaxed), crate::vu::VU_CYCLES[0].swap(0, Relaxed), crate::vu::VU_CYCLES[1].swap(0, Relaxed), crate::vu::XGKICK_NS.swap(0, Relaxed) / 1_000_000, crate::vu::XGKICKS.swap(0, Relaxed)));
     if let Some(t) = m.mtvu.as_ref() {
         log(format!("{} | VIF1 stopped {} stat {:#x} | DMA ch1 chcr {:#x} ch2 chcr {:#x} | istat {:#x} imask {:#x}", t.status(), m.vif[1].stopped, m.vif[1].stat, m.dmac.ch[1].chcr, m.dmac.ch[2].chcr, m.istat, m.imask));
     }

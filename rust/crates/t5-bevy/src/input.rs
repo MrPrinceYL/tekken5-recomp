@@ -520,7 +520,8 @@ pub fn read_input(
     let two = pads.len() >= 2 && input.active.len() >= 2;
     let p1_pads: Vec<(PadId, PadRef)> = if two { pads[..1].to_vec() } else { pads.clone() };
     let dev1 = Devices { keys: &keys, mouse: &mouse, pads: p1_pads, origins: &input.origins, mouse_stick: ms, deadzone: c.deadzone };
-    let b1 = input.buttons(&dev1);
+    // Scripted presses of a measurement run (`--press`, t5_recomp::script).
+    let b1 = input.buttons(&dev1) | t5_recomp::script::held();
     input.pad.set(0, b1, true);
     input.pad.set_sticks(0, input.sticks(&dev1));
     if two {

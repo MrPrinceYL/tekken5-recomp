@@ -25,6 +25,48 @@ pub fn run() -> ! {
     ps2_runtime::kernel::run()
 }
 
+/// Scripted pad presses for measurement runs (t5-headless, and t5-bevy for window runs):
+/// `--press BUTTON@SECOND` (BUTTON: START, CROSS, CIRCLE, UP, DOWN, LEFT, RIGHT), held for
+/// T5_HOLD seconds (default 0.5), counted from `script::init`.
+pub mod script {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    static SCRIPT: OnceLock<(Instant, f64, Vec<(u16, f64)>)> = OnceLock::new();
+
+    /// Read the presses from the command line and start the clock; false when there are none.
+    pub fn init(args: &[String]) -> bool {
+        let mut presses = Vec::new();
+        for w in args.windows(2).filter(|w| w[0] == "--press") {
+            if let Some((b, t)) = w[1].split_once('@') {
+                let bit = match b {
+                    "START" => ps2_runtime::pad::START,
+                    "CROSS" => ps2_runtime::pad::CROSS,
+                    "CIRCLE" => ps2_runtime::pad::CIRCLE,
+                    "UP" => ps2_runtime::pad::UP,
+                    "DOWN" => ps2_runtime::pad::DOWN,
+                    "LEFT" => ps2_runtime::pad::LEFT,
+                    "RIGHT" => ps2_runtime::pad::RIGHT,
+                    _ => 0,
+                };
+                presses.push((bit, t.parse().unwrap_or(0.0)));
+            }
+        }
+        // T5_HOLD=<seconds>: how long a press is held (menus repeat when held long).
+        let hold = std::env::var("T5_HOLD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5);
+        let some = !presses.is_empty();
+        let _ = SCRIPT.set((Instant::now(), hold, presses));
+        some
+    }
+
+    /// The scripted buttons held right now.
+    pub fn held() -> u16 {
+        let Some((t0, hold, presses)) = SCRIPT.get() else { return 0 };
+        let t = t0.elapsed().as_secs_f64();
+        presses.iter().filter(|(_, at)| t >= *at && t < at + hold).fold(0, |a, (b, _)| a | b)
+    }
+}
+
 /// Write an RGBA image as a PNG (stored deflate blocks: no compression library needed).
 pub fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> std::io::Result<()> {
     fn crc32(data: &[u8]) -> u32 {

@@ -13,22 +13,6 @@ fn main() {
     let secs: u64 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(30);
     let out = args.get(2).cloned().unwrap_or_else(|| "headless".into());
     let _ = std::fs::create_dir_all(&out);
-    let mut presses: Vec<(u16, f64)> = Vec::new();
-    for w in args.windows(2).filter(|w| w[0] == "--press") {
-        if let Some((b, t)) = w[1].split_once('@') {
-            let bit = match b {
-                "START" => ps2_runtime::pad::START,
-                "CROSS" => ps2_runtime::pad::CROSS,
-                "CIRCLE" => ps2_runtime::pad::CIRCLE,
-                "UP" => ps2_runtime::pad::UP,
-                "DOWN" => ps2_runtime::pad::DOWN,
-                "LEFT" => ps2_runtime::pad::LEFT,
-                "RIGHT" => ps2_runtime::pad::RIGHT,
-                _ => 0,
-            };
-            presses.push((bit, t.parse().unwrap_or(0.0)));
-        }
-    }
     let shared = t5_recomp::boot();
     std::thread::Builder::new()
         .name("ps2-ee".into())
@@ -39,14 +23,10 @@ fn main() {
             t5_recomp::run()
         })
         .expect("spawn guest thread");
-    let t0 = std::time::Instant::now();
+    t5_recomp::script::init(&args);
     let pad = shared.pad.clone();
     std::thread::spawn(move || loop {
-        let t = t0.elapsed().as_secs_f64();
-        // T5_HOLD=<seconds>: how long a press is held (default 0.5; menus repeat when held long).
-        let hold: f64 = std::env::var("T5_HOLD").ok().and_then(|v| v.parse().ok()).unwrap_or(0.5);
-        let held = presses.iter().filter(|(_, at)| t >= *at && t < at + hold).fold(0u16, |a, (b, _)| a | b);
-        pad.buttons[0].store(held, std::sync::atomic::Ordering::Relaxed);
+        pad.buttons[0].store(t5_recomp::script::held(), std::sync::atomic::Ordering::Relaxed);
         std::thread::sleep(std::time::Duration::from_millis(10));
     });
     // T5_PROFILE=<start>: sample the guest thread from that second to the end (Windows only).

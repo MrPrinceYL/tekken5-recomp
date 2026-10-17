@@ -1550,9 +1550,16 @@ pub fn xgkick(mp: *mut Machine, data: *mut u8, addr: u32) {
         kick_hash(unsafe { std::slice::from_raw_parts(data, 0x4000) }, addr);
     }
     if !BENCH.load(std::sync::atomic::Ordering::Relaxed) {
+        let t0 = std::time::Instant::now();
         crate::gif::path1(unsafe { &mut *mp }, addr);
+        XGKICK_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        XGKICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
+
+/// Time in PATH1 (XGKICK -> GIF -> GS queue) and number of XGKICKs, for the period summary.
+pub static XGKICK_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static XGKICKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// T5_VUTRACE=<start pc hex>:<nth run>: trace that run of a VU1 program.
 fn trace_this(pc: u32) -> bool {

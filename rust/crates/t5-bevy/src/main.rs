@@ -50,6 +50,8 @@ fn main() {
         .stack_size(512 << 20)
         .spawn(|| t5_recomp::run())
         .expect("spawn guest thread");
+    // Measurement runs: `--press BUTTON@SECOND` as in t5-headless.
+    t5_recomp::script::init(&std::env::args().collect::<Vec<_>>());
     start_audio(shared.audio.clone());
 
     let mut app = App::new();
