@@ -4,7 +4,7 @@
 //! SELECT held + L1 opens / closes it; with SELECT held: Up / Down entry, Left / Right value,
 //! CIRCLE run / toggle. Structures (DevilWithin.md, "Mod-Menü"):
 //!
-//! - Characters ("man", 0x148400): tasks of type 1000 with update 0x1493F8 in the task pool
+//! - Characters ("man", 0x148400): tasks of type 1000 (+0x3C) in the task pool
 //!   0x2A9A30. +0x1C name, +0x140 input record index, +0x144 character data index, +0x148 AI,
 //!   +0x154 bit 2 = AI controlled (set at creation), +0x162 pad port.
 //! - Input records (0x15C6A0): pool *0x42B6FC, stride [0x42B6F0], count [0x42B6EA] (short);
@@ -24,7 +24,10 @@ use ps2_runtime::Machine;
 use std::sync::Mutex;
 
 const TASK_POOL: u32 = 0x002A_9A30;
-const MAN_UPDATE: u32 = 0x0014_93F8;
+/// Task type of a character ("man", 0x148400 passes 1000 to the task allocator 0x123288; the
+/// tsEHpMan* functions check +0x3C == 1000). The update function differs (the player's is not
+/// 0x1493F8), so the type identifies them.
+const MAN_TYPE: i16 = 1000;
 const MAN_MGR: u32 = 0x0041_BB10;
 const MAN_POOL: u32 = 0x0042_B66C;
 const MAN_STRIDE: u32 = 0x0042_B660;
@@ -71,7 +74,7 @@ fn characters(m: &Machine) -> Vec<u32> {
         if t == 0 {
             break;
         }
-        if word(m, t + 0x20) == MAN_UPDATE {
+        if half(m, t + 0x3C) == MAN_TYPE {
             out.push(t);
         }
         t = word(m, t + 0x18);

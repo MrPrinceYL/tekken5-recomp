@@ -173,8 +173,9 @@ Wiedereinstieg 0x1034A0 auslösen würde) → nächstes hoch/runter = Endlosschl
 hoch/runter Eintrag, links/rechts Auswahl, KREIS ausführen.
 
 **Belegte Strukturen** (Funktionsnamen aus den Debug-Strings der Bibliothek `tsEHpMan*`):
-- Figuren („man“, erzeugt von 0x148400 → 0x148070): Tasks Typ 1000 mit Update 0x1493F8 im
-  Task-Pool. +0x1C Name, +0x140 Index Eingabe-Datensatz, +0x144 Index Figurdaten, +0x148 KI,
+- Figuren („man“, erzeugt von 0x148400 → 0x148070): Tasks Typ 1000 (+0x3C) im Task-Pool;
+  Update meist 0x1493F8, die des Spielers nicht (Nutzertest 18.10.: Rückweg zu Jin scheiterte,
+  solange nach der Update-Funktion gesucht wurde). +0x1C Name, +0x140 Index Eingabe-Datensatz, +0x144 Index Figurdaten, +0x148 KI,
   +0x154 Bit 2 = KI-gesteuert (nur bei Erzeugung und Tod ausgewertet: ohne Bit → Game Over
   0x10E0C8, mit Bit → besiegter Gegner 0x11F9B0), +0x160 Modell, +0x162 Pad-Port.
 - Eingabe-Datensatz (0x15C6A0, Pool *0x42B6FC, Schritt [0x42B6F0], Anzahl [0x42B6EA]):
@@ -196,6 +197,17 @@ hoch/runter Eintrag, links/rechts Auswahl, KREIS ausführen.
 - matty-Cheats: Restore 30% health, Set/Clear COLLECT flags.
 - **Position probe:** zeigt Kandidaten der Position (Matrix +0x30, Yaw, obj+0x16C) – Grundlage für
   Teleport/No-Clip.
+
+**Figurenwahl aus allen Figuren (Nutzerwunsch, nicht nur übernehmen):** Weg im Spiel gefunden,
+noch nicht gebaut: 0x120358(id) = Figurenprofil (Tabelle [0x41B450]+0x48, Anzahl +0x44, 0x80 Byte
+je Profil, +4 ID, +0x40 Name `chr_*`); 0x1203F0(1, profil) lädt `list/<name>.txt` (Modell,
+Bewegungen, KI; asynchron über 0x10CBE0); 0x148BC0(datensatz, 0) erzeugt die Figur als Spieler aus
+einem Datensatz {+4 Profil-ID, +0xC/+0x10/+0x14 Position, +0x18 Yaw, +0x1C Leben, +0x20 Max,
++0x24 Devil-Leiste}. So stellt das Spiel Jin wieder her (0x135B20, Profil 0x31E) und lädt der
+„Gimmick Viewer“ (0x1E0EC0) eine Figur. Nötig: Gast-Aufrufe mit Argumenten und Rückgabewert, ein
+Datensatz im Gastspeicher, Warten auf das Laden, Jin entfernen (0x20B428). Offen: ob die
+`list/`-Dateien Daten aus nicht geladenen Gebietspaketen nachladen (die Figurendateien liegen in
+den Paketen ihrer Gebiete).
 
 **Noch nicht gebaut (Begründung):**
 - Teleport / No-Clip: maßgebliche Position nicht belegt (Matrix +0x70 vs. Bewegungs-Engine
