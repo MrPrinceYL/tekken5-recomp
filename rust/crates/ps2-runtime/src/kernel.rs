@@ -567,6 +567,19 @@ fn load_elf(m: &mut Machine, path: &str) -> Option<(u32, u32)> {
 // ---------------------------------------------------------------------------------------------
 // Interrupts
 
+/// Guest functions a game crate asked to run (`request_guest_call`; t5_recomp::devil_debug's
+/// opt-in cheat menu): called like an interrupt handler at the next service point.
+static GUEST_CALLS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+/// Run the guest function `func` (no arguments, the interrupted thread's gp) at the next
+/// interrupt service point, in interrupt context like the game's own handlers.
+pub fn request_guest_call(func: u32) {
+    if let Ok(mut q) = GUEST_CALLS.lock() {
+        q.push(func);
+    }
+    ATTENTION.store(true, Relaxed);
+}
+
 /// Deliver pending INTC / DMAC interrupts if enabled (called from `service`).
 pub fn take_interrupts(c: &mut Ctx) {
     let m = machine();
@@ -576,7 +589,8 @@ pub fn take_interrupts(c: &mut Ctx) {
     let intc = m.istat & m.imask;
     let dmac = crate::dmac::pending(m);
     let alarms = due_alarms(m);
-    if intc == 0 && dmac == 0 && alarms.is_empty() {
+    let calls: Vec<u32> = GUEST_CALLS.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
+    if intc == 0 && dmac == 0 && alarms.is_empty() && calls.is_empty() {
         return;
     }
     m.kernel.in_irq = true;
@@ -606,6 +620,9 @@ pub fn take_interrupts(c: &mut Ctx) {
     }
     for a in alarms {
         call_handler(c, a.func, a.gp, &[a.id as u64, a.ticks as u64, a.arg as u64]);
+    }
+    for f in calls {
+        call_handler(c, f, 0, &[]);
     }
     c.regs.copy_from_slice(&saved.regs[..]);
     c.next = saved.next;

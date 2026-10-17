@@ -308,7 +308,18 @@ im Release **geleert**) und „体力30％回復“ = **30 % Leben auffüllen** 
 + Max × Faktor), Zweig „DEBUG matty“ mit global flag / register / system register list,
 **auto-attack** (MT_DEBUG_AUTO_ATTACK 0x1D9970), „impact STR hack“, „Set / Clear COLLECT flags“;
 dazu Einträge FORCE MENU, PAUSE MENU, STAGE RESULT, TOTAL RESULT, MAIN MENU. Die Zeichenfunktion
-(0x1CBF70) ist wie alle Debug-Ausgaben ohne Text → im Overlay noch nicht sichtbar (nächster Schritt).
+(0x1CBF70) räumt nur auf; der eigentliche Antrieb der Baumansicht (Eingabe/Zeichnen 0x1D8260,
+0x1D88B0) wird von nichts mehr aufgerufen (nur `.eh_frame`-Treffer) → MATTY TEST zeigt nichts.
+
+**Cheat-Menü im Spiel (18.10., `T5_DW_DEBUG`):** SELECT halten + L1 öffnet/schließt, SELECT + hoch/
+runter wählt, SELECT + KREIS führt aus. Einträge = die Knoten des matty-Baums (Namen aus dem
+Programm). Ausführbar sind die Funktionen ohne Parameter: **Restore 30% health** (0x1D92B0),
+**Set COLLECT flags** (0x1D9A78: Flags 0x200–0x227 = 1, alle Sammelobjekte als gefunden – wird mit
+dem Spielstand gespeichert!) und **Clear COLLECT flags** (0x1D9AF0). Nicht verfügbar: Gold Passport
+(geleert), auto-attack, impact STR hack und die Listen (brauchen den Kontext der entfernten
+Baumansicht). Aufruf über `ps2_runtime::kernel::request_guest_call`: die Laufzeit ruft die
+Spielfunktion am nächsten Interrupt-Punkt wie einen Interrupt-Handler des Spiels auf (eigener
+Stack, gp des unterbrochenen Threads). Nutzertest offen.
 
 **Entwickler-Warpliste `area/mpl.txt` (81 Einträge, Index = MAP VIEWER):** 0–48 die fünf Gebiete
 (je Raum, Bossraum, Speicherraum), dazu Testkarten: `bgtest` 1–4 Musterkarten von Yamauchi
