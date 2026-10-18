@@ -47,17 +47,40 @@ const CHR_COUNT: u32 = 0x0048_04A2;
 const PROFILES: u32 = 0x0041_B450;
 const HERO_RECORD: u32 = 0x0042_B610;
 const SAVE_HERO: u32 = 0x0014_6D98;
-const LOAD_LIST: u32 = 0x0012_03F0;
 const CREATE_HERO: u32 = 0x0014_8BC0;
 const TASK_KILL: u32 = 0x0020_B428;
 /// Pack load slots (0x10C3A8): [0x41AF98] + slot * 0x4C; free while +0x141 (loaded, 0x10A060)
 /// and +0x144 (pack) are 0. 16 slots.
 const LOAD_SLOTS: u32 = 0x0041_AF98;
 
-/// A free load slot for a profile's list (slot 0 is the area's).
-fn free_slot(m: &Machine) -> Option<u32> {
-    let base = word(m, LOAD_SLOTS);
-    (1..16).find(|s| ram_read(m, base + s * 0x4C + 0x141, 1) == 0 && word(m, base + s * 0x4C + 0x144) == 0)
+/// Whether the model of a profile is in a loaded pack: the slots' BDPK packs (+0x144: handle -> header
+/// with the entry count at +4, entries of 0x80 bytes from +0x80, name at +0x14; 0x10A5A8).
+/// The profile `chr_X[_lvN]` uses the model `obj_obj_X` (common/char_model_all.txt). Retail
+/// discs cannot load other characters' data: the list loader 0x1203F0 opens
+/// `host0:romdata/list/<name>.txt` on the developers' PC; character data comes only from the
+/// packs of the area being played (Jin and Devil Jin from common/base.pak).
+fn model_loaded(m: &Machine, profile: &str) -> bool {
+    let base = profile.strip_prefix("chr_").unwrap_or(profile);
+    let base = match base.rfind("_lv") {
+        Some(i) if base[i + 3..].chars().all(|c| c.is_ascii_digit()) => &base[..i],
+        _ => base,
+    };
+    let base = base.strip_suffix(|c: char| c.is_ascii_uppercase()).map(|b| b.trim_end_matches('_')).unwrap_or(base);
+    let want = format!("obj_obj_{base}");
+    let slots = word(m, LOAD_SLOTS);
+    (0..16).any(|s| {
+        // +0x144 is a handle whose first word points at the pack data (0x109F80).
+        let h = word(m, slots + s * 0x4C + 0x144);
+        let pak = if h != 0 { word(m, h) } else { 0 };
+        if pak == 0 || word(m, pak) != 0x4B50_4442 {
+            return false;
+        }
+        let n = word(m, pak + 4).min(4096);
+        (0..n).any(|i| {
+            let e = pak + 0x80 * (i + 1);
+            half(m, e) as u16 == 0x4442 && cstr(m, e + 0x14) == want
+        })
+    })
 }
 
 /// Pad 1 held buttons (0x2A9890 + 0x50).
@@ -174,13 +197,15 @@ fn player(m: &Machine) -> u32 {
 }
 
 /// Steps of "Become": the game saves the hero record (thread call SAVE_HERO, record magic
-/// cleared first so its arrival is visible), then the profile id is set and, in the game's
-/// thread, its list is loaded (file reads wait), the old man removed and the new one created
-/// from the record.
+/// cleared first so its arrival is visible); then the old man is removed and the new one created
+/// from the record with the new profile id (the creation 0x148968 -> 0x148400 fails while a
+/// hero exists, headless test 18.10.). If no new man appears, the old profile is created again
+/// from the same record.
 #[derive(Clone, Copy, PartialEq)]
 enum Become {
     Idle,
     Saved { old: u32, id: u32, waited: u32 },
+    Created { old_id: u32, id: u32, waited: u32 },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -312,30 +337,50 @@ fn restore(m: &mut Machine, st: &mut State) {
     }
 }
 
-/// Advance "Become": once the hero record is there, set the profile and queue the rest.
+/// The man of profile `id` other than `old`, if one exists.
+fn man_of(m: &Machine, id: u32, old: u32) -> Option<u32> {
+    characters(m).into_iter().find(|&t| t != old && half(m, t + 0x160) as u16 as u32 == id)
+}
+
+/// Advance "Become" by one step per vertical blank.
 fn become_step(m: &mut Machine, st: &mut State) {
-    let Become::Saved { old, id, waited } = st.become_step else { return };
-    if half(m, HERO_RECORD) as u16 != 0x33AC || half(m, HERO_RECORD + 0x28) as u16 != 0x3832 {
-        st.become_step = if waited > 120 {
-            st.last = "become: the game did not write the hero record".into();
-            Become::Idle
-        } else {
-            Become::Saved { old, id, waited: waited + 1 }
-        };
-        return;
+    match st.become_step {
+        Become::Idle => {}
+        Become::Saved { old, id, waited } => {
+            if half(m, HERO_RECORD) as u16 != 0x33AC || half(m, HERO_RECORD + 0x28) as u16 != 0x3832 {
+                st.become_step = if waited > 120 {
+                    st.last = "become: the game did not write the hero record".into();
+                    Become::Idle
+                } else {
+                    Become::Saved { old, id, waited: waited + 1 }
+                };
+                return;
+            }
+            let old_id = word(m, HERO_RECORD + 4);
+            ram_write(m, HERO_RECORD + 4, 4, id as u64);
+            if alive(m, old) {
+                request_thread_call(TASK_KILL, &[TASK_POOL as u64, old as u64]);
+            }
+            request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
+            st.become_step = Become::Created { old_id, id, waited: 0 };
+        }
+        Become::Created { old_id, id, waited } => match man_of(m, id, 0) {
+            Some(new) => {
+                ps2_runtime::diag::log(format!("devil mod: became profile {id:#x} ({new:#x})"));
+                st.last = format!("now playing as {}", name(m, new));
+                st.become_step = Become::Idle;
+            }
+            None if waited > 60 => {
+                // Give the old character back from the same record.
+                ram_write(m, HERO_RECORD + 4, 4, old_id as u64);
+                request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
+                st.last = "become: the game could not create that character here; old one restored".into();
+                ps2_runtime::diag::log(format!("devil mod: become profile {id:#x} failed, restoring {old_id:#x}"));
+                st.become_step = Become::Idle;
+            }
+            None => st.become_step = Become::Created { old_id, id, waited: waited + 1 },
+        },
     }
-    st.become_step = Become::Idle;
-    let Some((_, prof, _)) = profiles(m).into_iter().find(|p| p.0 == id) else { return };
-    ram_write(m, HERO_RECORD + 4, 4, id as u64);
-    match free_slot(m) {
-        Some(slot) => request_thread_call(LOAD_LIST, &[slot as u64, prof as u64]),
-        None => ps2_runtime::diag::log("devil mod: become without loading (no free load slot)".into()),
-    }
-    if alive(m, old) {
-        request_thread_call(TASK_KILL, &[TASK_POOL as u64, old as u64]);
-    }
-    request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
-    ps2_runtime::diag::log(format!("devil mod: become profile {id:#x} (replacing {old:#x})"));
 }
 
 /// Every vertical blank while Devil Within runs: input, effects, menu text.
@@ -427,6 +472,9 @@ pub fn update(m: &mut Machine, out: &mut String) {
         if new & CIRCLE != 0 {
             st.last = match entry {
                 Entry::Become => match (profs.get(st.profile), player(m)) {
+                    (Some((_, _, pname)), _) if !model_loaded(m, pname) => {
+                        format!("{pname} is not loaded in this area (retail data comes only from the area's packs)")
+                    }
                     (Some((id, _, pname)), old) if old != 0 && st.become_step == Become::Idle => {
                         restore(m, st);
                         ram_write(m, HERO_RECORD, 4, 0);
@@ -510,7 +558,10 @@ pub fn update(m: &mut Machine, out: &mut String) {
         }
     }
     let target = chars.get(st.pick).map(|&t| name(m, t)).unwrap_or_else(|| "-".into());
-    let prof = profs.get(st.profile).map(|p| format!("{} ({:#x})", p.2, p.0)).unwrap_or_else(|| "-".into());
+    let prof = profs
+        .get(st.profile)
+        .map(|p| format!("{} ({:#x}){}", p.2, p.0, if model_loaded(m, &p.2) { "" } else { " [not loaded here]" }))
+        .unwrap_or_else(|| "-".into());
     let on = |b: bool| if b { "ON" } else { "OFF" };
     out.push_str("MOD MENU (Devil Within, branch devil/debug)\n");
     for (i, e) in ENTRIES.iter().enumerate() {
