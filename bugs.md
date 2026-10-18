@@ -46,6 +46,13 @@
         DTE-Dithering und Alpha-Bit = (Alpha == 0x40) wie `ipu_dither_reference`.
       Nutzertest offen.
 - [ ] B13 FMVs: Ton manchmal asynchron zum Bild (Nutzer 18.10.: weiterhin).
+      Nutzertest 19.10. (nach IPU-Fixes): Artefakte weiter (16×16-Blöcke mit veraltetem /
+      versetztem Inhalt in P/B-Bildern, Screenshot), Ton weiter asynchron, Overlay im FMV
+      50 FPS. Hypothese für B10 + B13 zusammen: Dekodieren langsamer als Echtzeit → libmpeg
+      überspringt Bilder (`_decodeOrSkipFrame`), auch Referenzbilder → Folgebilder bauen auf
+      veraltetem Inhalt auf, Bild hinkt dem Ton nach. Geprüft ohne Befund: ldl/ldr (Ghidra-
+      Paar → unausgerichtetes LOAD, Runtime bytegenau), MTSAB/QFSRV (SA in Bits, 0x400 →
+      REG_SA). Nächster Schritt: Profil im Intro-FMV.
 
 # Bugliste (Nutzerbericht 14.10.2026) + Prioritäten
 
