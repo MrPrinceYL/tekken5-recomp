@@ -297,6 +297,21 @@ kompakt neu gepackt. Der Heapblock hat genau die gekürzte Größe. Headless: Mo
 in kleinen Räumen kürzt das Spiel den Kameraabstand an den Wänden (+0x38 < +0x3C, jedes Bild neu),
 True Ogre bleibt dort nah (Stelle der Kürzung noch nicht gefunden).
 
+**Bosskämpfe in den Stage-Selects (18.10.):** Hinter „back“ (und im Mod-Menü-Eintrag Stage)
+stehen jetzt Makino-Testraum, Boss 1 (Labor A), Boss 2 (Labor B), Boss 3 Ogre (Ägypten), Arena 4
+(Blaue Ruinen A), Boss 5 True Ogre (Blaue Ruinen B) = Warpliste `<gebiet> 5` (Indizes 5, 13, 24,
+36, 47). Der Stage-Start findet nur `<gebiet> 1` (0x125F88(name, 1)); der Lader baut den Raum
+aus Gebiet und Nummer (`%s_%03d`, 0x126078), die Nummer lässt sich also nicht verbiegen.
+GAME MAIN ([0x41B040], 0x10D4E8) übernimmt in Zustand 6→7 (ohne Pause) +0x40 = Warp-Index und
+startet ihn mit 0x10D728. Ein Boss startet daher wie die Stage seines Gebiets (gleicher
+Stage-Index, die Bossbedingungen prüfen ihn), und im selben Thread-Aufruf-Stapel wird +0x40 auf
+den Bossraum gesetzt: `0x175A78` (`lw v0,0(a0)`) holt GAME MAINs Adresse, sein Kopf (0x44 Byte)
+wird kopiert, +0x40 ersetzt, zurückkopiert. Im Titel-Stage-Select entsteht GAME MAIN erst beim
+Start und liest den Index im selben Bild (Vblank-Setzen kam zu spät, headless) → für Bossräume
+übernimmt die Mod den Levelschritt (Spiel-Pad gesperrt) und startet selbst wie 0x103E88:
+0x101D58(0,0), 0x1046E8(Modus, Stufe, Stage), Task beenden, Warp setzen. Headless: Titel → Boss 2
+(Kampf läuft), Mod-Menü → True-Ogre-Arena (Kampf läuft).
+
 **Figuren anderer Gebiete (Stand vorher, überholt):** Der Listen-Lader 0x1203F0/0x10C3A8
 öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
 host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur

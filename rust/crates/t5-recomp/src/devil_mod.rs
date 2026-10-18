@@ -1055,11 +1055,11 @@ const STAGE_CHOICES: usize = 5 + crate::devil_debug::EXTRA_STAGES.len();
 fn stage_name(m: &Machine, i: usize) -> String {
     use crate::devil_debug::{EXTRA_STAGES, STAGE_COUNT, STAGE_NAMES};
     if i as u32 >= STAGE_COUNT {
-        return EXTRA_STAGES[i - STAGE_COUNT as usize].1.into();
+        return EXTRA_STAGES[i - STAGE_COUNT as usize].label.into();
     }
     // Entry 0 may name an extra stage for a moment: label by index.
     let n = cstr(m, word(m, STAGE_NAMES + 4 * i as u32));
-    if i == 0 && EXTRA_STAGES.iter().any(|e| e.0 == n) { "lab_A".into() } else { n }
+    if i == 0 && EXTRA_STAGES.iter().any(|e| e.name == Some(n.as_str())) { "lab_A".into() } else { n }
 }
 
 /// Every vertical blank while Devil Within runs: input, effects, menu text.
@@ -1174,7 +1174,7 @@ pub fn update(m: &mut Machine, out: &mut String) {
     if held & (L3 | R3) == L3 | R3 && new & (L3 | R3) != 0 {
         st.open = !st.open;
     }
-    ps2_runtime::pad::BLOCK.store(st.open, std::sync::atomic::Ordering::Relaxed);
+    ps2_runtime::pad::BLOCK.store(st.open || crate::devil_debug::select_blocks(), std::sync::atomic::Ordering::Relaxed);
     if !st.open {
         return;
     }
@@ -1245,16 +1245,23 @@ pub fn update(m: &mut Machine, out: &mut String) {
                 Entry::Stage => {
                     // What the stage select does on start (0x1046E8 -> 0x10D708): 0x10D680 with
                     // the game's root task; an extra stage through stage 0's name.
-                    let stage = if st.stage >= 5 {
-                        crate::devil_debug::set_stage0(m, Some(st.stage - 5));
-                        st.stage_restore = 30;
-                        0
-                    } else {
-                        st.stage
+                    let extra = st.stage.checked_sub(5);
+                    let stage = match extra {
+                        Some(e) => {
+                            crate::devil_debug::set_stage0(m, Some(e));
+                            st.stage_restore = 30;
+                            crate::devil_debug::EXTRA_STAGES[e].stage as usize
+                        }
+                        None => st.stage,
                     };
                     st.noclip = None;
                     restore(m, st);
                     request_thread_call(START_STAGE, &[word(m, ROOT_TASK) as u64, stage as u64]);
+                    // A boss room: its warp index replaces the stage's start in the same batch,
+                    // before GAME MAIN's state 7 reads it.
+                    if let Some(idx) = extra.and_then(|e| crate::devil_debug::extra_warp(m, e)) {
+                        crate::devil_debug::request_warp(m, idx);
+                    }
                     format!("starting {}", stage_name(m, st.stage))
                 }
                 Entry::NoClip => match (st.noclip, p) {

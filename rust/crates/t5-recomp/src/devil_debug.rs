@@ -78,36 +78,114 @@ pub fn install() {
 /// `table[i]` 1 via 0x125F88); only 0x10D680 reads the table.
 pub const STAGE_NAMES: u32 = 0x002B_8558;
 pub const STAGE_COUNT: u32 = 5;
-/// Unused stages added behind the five (warp list entries `<area> 1` with files on the disc,
-/// DevilWithin.md): (area, label). While one is chosen, table entry 0 names it (the string lives
-/// in the unused path buffer of load slot 11). The other test maps have no files; `chr 1`
-/// (lists and scripts, no room geometry) stays on NOW LOADING (headless 18.10.).
-pub const EXTRA_STAGES: &[(&str, &str)] = &[("makino", "Makino test room")];
-const EXTRA_STR: u32 = 0x0042_5B80 + 11 * 0x100;
-/// (Lab A's name pointer, chosen extra stage) while stage 0 names an extra stage.
-static EXTRA: std::sync::Mutex<Option<(u32, usize)>> = std::sync::Mutex::new(None);
+/// Stages added behind the five: the unused ones with files on the disc (warp list `<area> 1`,
+/// DevilWithin.md; the other test maps have no files, `chr 1` - lists and scripts, no room
+/// geometry - stays on NOW LOADING, headless 18.10.) and the boss fights (room 5 of each area).
+pub struct Extra {
+    pub label: &'static str,
+    /// The name stage 0 gets while it is chosen (its warp list entry `<name> 1`).
+    pub name: Option<&'static str>,
+    /// The stage it starts as (0x10D680; the boss conditions test the stage, e.g. 4).
+    pub stage: u32,
+    /// Warp list room: 1 = the stage's start, else the room started instead (GAME MAIN +0x40,
+    /// which 0x10D728 loads in state 7).
+    pub room: i16,
+}
 
-/// Let stage 0 start extra stage `e`, or Lab A again (None).
-pub fn set_stage0(m: &mut Machine, e: Option<usize>) {
-    let mut cur = EXTRA.lock().unwrap();
-    match (e, *cur) {
-        (Some(e), _) => {
-            for (i, b) in EXTRA_STAGES[e].0.bytes().chain(std::iter::once(0)).enumerate() {
-                ram_write(m, EXTRA_STR + i as u32, 1, b as u64);
-            }
-            let orig = cur.map(|c| c.0).unwrap_or_else(|| word(m, STAGE_NAMES));
-            ram_write(m, STAGE_NAMES, 4, EXTRA_STR as u64);
-            *cur = Some((orig, e));
-        }
-        (None, Some((orig, _))) => {
-            ram_write(m, STAGE_NAMES, 4, orig as u64);
-            *cur = None;
-        }
-        (None, None) => {}
+pub const EXTRA_STAGES: &[Extra] = &[
+    Extra { label: "Makino test room", name: Some("makino"), stage: 0, room: 1 },
+    Extra { label: "Boss 1 (Lab A)", name: None, stage: 0, room: 5 },
+    Extra { label: "Boss 2 Heihachi-type (Lab B)", name: None, stage: 1, room: 5 },
+    Extra { label: "Boss 3 Ogre (Egypt)", name: None, stage: 2, room: 5 },
+    Extra { label: "Boss 4 arena (Blue Ruins A)", name: None, stage: 3, room: 5 },
+    Extra { label: "Boss 5 True Ogre (Blue Ruins B)", name: None, stage: 4, room: 5 },
+];
+const EXTRA_STR: u32 = 0x0042_5B80 + 11 * 0x100;
+/// GAME MAIN (0x10D4E8 creates it; 0x10D680 sets +0x34 = 6, +0x40 = warp index).
+pub const GAME_MAIN: u32 = 0x0041_B040;
+/// (Lab A's name pointer if stage 0 was renamed, chosen extra stage).
+static EXTRA: std::sync::Mutex<Option<(Option<u32>, usize)>> = std::sync::Mutex::new(None);
+
+/// The stage select's level step for a boss room is driven by the mod (the game's pad is
+/// blocked, `select_blocks`): its own start would read the stage's first room in the frame it
+/// creates GAME MAIN (headless 18.10.).
+static SELECT_BLOCK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn select_blocks() -> bool {
+    SELECT_BLOCK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `lw v0, 0(a0)`: the thread calls get GAME MAIN's address from 0x41B040 with it.
+const LOAD_WORD: u32 = 0x0017_5A78;
+const MEMCPY: u32 = 0x0027_3034;
+/// Scratch: GAME MAIN's first 0x44 bytes, and the warp index (path buffer of the unused slot 11).
+const GM_HEAD: u32 = 0x0042_5B80 + 11 * 0x100 + 0xB0;
+const WARP_SRC: u32 = 0x0042_5B80 + 11 * 0x100 + 0xA0;
+
+/// Thread calls that set GAME MAIN +0x40 (the warp index state 7 loads) to `idx`, wherever GAME
+/// MAIN is: copy its head out, patch +0x40, copy it back (nothing else runs in between).
+pub fn request_warp(m: &mut Machine, idx: u32) {
+    use ps2_runtime::kernel::{request_thread_call, PREV_RESULT};
+    ram_write(m, WARP_SRC, 4, idx as u64);
+    request_thread_call(LOAD_WORD, &[GAME_MAIN as u64]);
+    request_thread_call(MEMCPY, &[GM_HEAD as u64, PREV_RESULT, 0x44]);
+    request_thread_call(MEMCPY, &[(GM_HEAD + 0x40) as u64, WARP_SRC as u64, 4]);
+    request_thread_call(LOAD_WORD, &[GAME_MAIN as u64]);
+    request_thread_call(MEMCPY, &[PREV_RESULT, GM_HEAD as u64, 0x44]);
+    ps2_runtime::diag::log(format!("devil: boss room, warp {idx}"));
+}
+
+/// The warp list index of `<area> <room>` (table **0x41B558, count 0x41B55C, 0x50 bytes each:
+/// +0 area, +0xE room).
+pub fn warp_index(m: &Machine, area: &str, room: i16) -> Option<u32> {
+    let table = match word(m, MPL_TABLE) {
+        0 => return None,
+        h => word(m, h),
+    };
+    (0..int(m, MPL_COUNT).max(0) as u32).find(|&i| {
+        let e = table + i * 0x50;
+        cstr(m, e) == area && ram_read(m, e + 0xE, 2) as i16 == room
+    })
+}
+
+/// The area name of stage `s` as the game has it (stage 0 possibly renamed for an extra).
+fn stage_area(m: &Machine, s: u32) -> String {
+    match (s, *EXTRA.lock().unwrap()) {
+        (0, Some((Some(orig), _))) => cstr(m, orig),
+        _ => cstr(m, word(m, STAGE_NAMES + 4 * s)),
     }
 }
 
-fn extra_chosen() -> Option<usize> {
+/// Choose extra stage `e` (None: back to the five): stage 0 names it if it has a name.
+pub fn set_stage0(m: &mut Machine, e: Option<usize>) {
+    let mut cur = EXTRA.lock().unwrap();
+    let orig = cur.and_then(|c| c.0);
+    if let Some(o) = orig {
+        ram_write(m, STAGE_NAMES, 4, o as u64);
+    }
+    *cur = None;
+    let Some(e) = e else { return };
+    let renamed = EXTRA_STAGES[e].name.map(|name| {
+        for (i, b) in name.bytes().chain(std::iter::once(0)).enumerate() {
+            ram_write(m, EXTRA_STR + i as u32, 1, b as u64);
+        }
+        let o = word(m, STAGE_NAMES);
+        ram_write(m, STAGE_NAMES, 4, EXTRA_STR as u64);
+        o
+    });
+    *cur = Some((renamed, e));
+}
+
+/// The warp index of extra stage `e`'s room, if it is not the stage's start.
+pub fn extra_warp(m: &Machine, e: usize) -> Option<u32> {
+    let x = &EXTRA_STAGES[e];
+    if x.room == 1 {
+        return None;
+    }
+    warp_index(m, &stage_area(m, x.stage), x.room)
+}
+
+pub fn extra_chosen() -> Option<usize> {
     EXTRA.lock().unwrap().map(|c| c.1)
 }
 
@@ -129,9 +207,35 @@ fn stage_select(m: &mut Machine, prev: &mut u32) {
         }
         t = word(m, t + 0x18);
     }
+    SELECT_BLOCK.store(false, std::sync::atomic::Ordering::Relaxed);
     if sel == 0 {
         // Started (the name was read) or left: Lab A again.
         set_stage0(m, None);
+        return;
+    }
+    if word(m, sel + 0x34) == 2 {
+        // Level step of a boss room: the mod does what 0x103E88 does with the real pad.
+        let Some(idx) = extra_chosen().and_then(|e| extra_warp(m, e)) else { return };
+        SELECT_BLOCK.store(true, std::sync::atomic::Ordering::Relaxed);
+        let raw = m.shared.pad.buttons[0].load(std::sync::atomic::Ordering::Relaxed) as u32;
+        static RAW_PREV: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let edge = raw & !RAW_PREV.swap(raw, std::sync::atomic::Ordering::Relaxed);
+        let level = word(m, sel + 0x38) as i32;
+        if edge & 0x10 != 0 {
+            ram_write(m, sel + 0x38, 4, (level - 1).clamp(0, 3) as u64);
+        } else if edge & 0x40 != 0 {
+            ram_write(m, sel + 0x38, 4, (level + 1).clamp(0, 3) as u64);
+        } else if edge & 0x4000 != 0 {
+            ram_write(m, sel + 0x34, 4, 1);
+        } else if edge & 0x2000 != 0 {
+            use ps2_runtime::kernel::request_thread_call;
+            // 0x101D58(0, controller 1), 0x1046E8(mode +0x40, level +0x38, stage +0x3C), end
+            // the select task (0x20B428), then the boss room's warp index.
+            request_thread_call(0x0010_1D58, &[0, 0]);
+            request_thread_call(0x0010_46E8, &[word(m, sel + 0x40) as u64, word(m, sel + 0x38) as u64, word(m, sel + 0x3C) as u64]);
+            request_thread_call(0x0020_B428, &[TASK_POOL as u64, sel as u64]);
+            request_warp(m, idx);
+        }
         return;
     }
     if word(m, sel + 0x34) != 1 {
@@ -144,16 +248,21 @@ fn stage_select(m: &mut Machine, prev: &mut u32) {
                 ram_write(m, sel + 0x3C, 4, 5);
                 return;
             }
-            if new & 0x10 != 0 {
-                set_stage0(m, Some(e - 1));
+            let e = if new & 0x10 != 0 {
+                e - 1
             } else if new & 0x40 != 0 && e + 1 < EXTRA_STAGES.len() {
-                set_stage0(m, Some(e + 1));
+                e + 1
+            } else {
+                e
+            };
+            if Some(e) != extra_chosen() {
+                set_stage0(m, Some(e));
             }
-            ram_write(m, sel + 0x3C, 4, 0);
+            ram_write(m, sel + 0x3C, 4, EXTRA_STAGES[e].stage as u64);
         }
         None if word(m, sel + 0x3C) == 5 && new & 0x40 != 0 => {
             set_stage0(m, Some(0));
-            ram_write(m, sel + 0x3C, 4, 0);
+            ram_write(m, sel + 0x3C, 4, EXTRA_STAGES[0].stage as u64);
         }
         None => {}
     }
@@ -177,6 +286,7 @@ fn hook(m: &mut Machine) {
         let mut prev = PREV.lock().unwrap();
         stage_select(m, &mut prev);
     }
+
     let mut text = overlay(m);
     crate::devil_mod::update(m, &mut text);
     if let Ok(mut t) = MENU_TEXT.lock() {
@@ -352,8 +462,8 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
             let st = s(0x3C);
             let name = match st {
                 _ if extra_chosen().is_some() => {
-                    let (a, l) = EXTRA_STAGES[extra_chosen().unwrap()];
-                    format!("{l} ({a} 1)")
+                    let x = &EXTRA_STAGES[extra_chosen().unwrap()];
+                    format!("{} (room {})", x.label, x.room)
                 }
                 0..=4 => format!("{st} {}", cstr(m, word(m, STAGE_NAMES + 4 * st as u32))),
                 _ => "back".to_string(),
