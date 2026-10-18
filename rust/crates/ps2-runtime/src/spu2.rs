@@ -799,7 +799,6 @@ pub fn update(m: &mut Machine, now: u64) {
         out.push(r);
     }
     m.spu2.generated += n;
-    wav_dump(&out);
     if std::mem::take(&mut m.spu2.irq) {
         m.iop.exec.pending_irq |= 1 << 9;
         iop_core::ATTENTION.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -811,34 +810,3 @@ pub fn update(m: &mut Machine, now: u64) {
     }
 }
 
-/// `T5_WAVDUMP=<file.wav>`: record the SPU2 output (48 kHz stereo 16-bit) while playing.
-fn wav_dump(out: &[i16]) {
-    use std::io::{Seek, SeekFrom, Write};
-    static FILE: std::sync::OnceLock<Option<Mutex<(std::fs::File, u32)>>> = std::sync::OnceLock::new();
-    let Some(f) = FILE.get_or_init(|| {
-        let path = std::env::var("T5_WAVDUMP").ok()?;
-        let mut f = std::fs::File::create(path).ok()?;
-        f.write_all(&[0u8; 44]).ok()?;
-        Some(Mutex::new((f, 0)))
-    }) else { return };
-    let mut g = f.lock().unwrap();
-    let bytes: Vec<u8> = out.iter().flat_map(|v| v.to_le_bytes()).collect();
-    let _ = g.0.write_all(&bytes);
-    g.1 += bytes.len() as u32;
-    let len = g.1;
-    // Keep the header valid so the file plays even if the game is closed abruptly.
-    let mut h = Vec::with_capacity(44);
-    h.extend_from_slice(b"RIFF");
-    h.extend_from_slice(&(36 + len).to_le_bytes());
-    h.extend_from_slice(b"WAVEfmt ");
-    h.extend_from_slice(&16u32.to_le_bytes());
-    h.extend_from_slice(&1u16.to_le_bytes());
-    h.extend_from_slice(&2u16.to_le_bytes());
-    h.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
-    h.extend_from_slice(&(SAMPLE_RATE * 4).to_le_bytes());
-    h.extend_from_slice(&4u16.to_le_bytes());
-    h.extend_from_slice(&16u16.to_le_bytes());
-    h.extend_from_slice(b"data");
-    h.extend_from_slice(&len.to_le_bytes());
-    let _ = g.0.seek(SeekFrom::Start(0)).and_then(|_| g.0.write_all(&h)).and_then(|_| g.0.seek(SeekFrom::End(0)));
-}

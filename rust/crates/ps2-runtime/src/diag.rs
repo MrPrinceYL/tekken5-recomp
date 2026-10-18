@@ -159,8 +159,8 @@ pub fn enabled(var: &'static str) -> bool {
     let set = SET.get_or_init(|| {
         std::env::vars_os()
             .map(|(k, _)| k.to_string_lossy().into_owned())
-            // T5_DISC / T5_MEMCARD / T5_WAVDUMP are settings, not diagnostics.
-            .filter(|k| k.starts_with("T5_") && !matches!(k.as_str(), "T5_DISC" | "T5_MEMCARD" | "T5_WAVDUMP"))
+            // T5_DISC / T5_MEMCARD are settings, not diagnostics.
+            .filter(|k| k.starts_with("T5_") && !matches!(k.as_str(), "T5_DISC" | "T5_MEMCARD"))
             .collect()
     });
     !set.is_empty() && set.iter().any(|k| k == var)

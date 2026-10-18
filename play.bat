@@ -12,8 +12,6 @@ pause
 exit /b 1
 :disc_ok
 if not defined T5_MEMCARD set "T5_MEMCARD=%~dp0memcard"
-rem The last session's sound is recorded to last_session.wav (for checking sound bugs).
-if not defined T5_WAVDUMP set "T5_WAVDUMP=%~dp0last_session.wav"
 cd /d "%~dp0"
 if exist "rust\Cargo.toml" goto generated
 echo Generating the Rust code from the sheets...
