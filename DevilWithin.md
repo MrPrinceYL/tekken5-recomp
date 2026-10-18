@@ -255,6 +255,15 @@ Registrierung klein, deshalb Pause davor). Scheitert etwas, kommt Jin zurück. S
 Paket und Become sind gesperrt, solange eine lebende gespawnte Figur das Mod-Paket nutzt.
 Headless: Monster → Soldat (lab_A_003) → Jin ohne Absturz, Bilder korrekt.
 
+**Objekte / Türen mit der gespielten Figur (18.10.):** Gimmicks fragen den Spieler über
+`0x147A98` ab (ManMgr-Eintrag; z. B. Abstand 0x1C7A08, Trefferquelle 0x1DA230). Nach Become und
+Take over zeigt der Eintrag auf die gespielte Figur (RAM geprüft). Fehler gefunden: Become
+erzeugt die Figur mit dem Team ihres Profils (Gegnerteam 1; das Spiel setzt es nach dem Erzeugen
+noch einmal), sie traf damit weder Gegner noch Objekte. Jetzt bekommt sie das Team der vorigen
+Spielerfigur (Jin: 0) und behält es (RAM: Team 0). Ob die blauen Kisten in Labor A Raum 1
+zerstörbar sind, ließ sich headless nicht prüfen (Jin bleibt mit dem Steuerkreuz am Glasboden
+stehen) – Nutzertest.
+
 **Figuren anderer Gebiete (Stand vorher, überholt):** Der Listen-Lader 0x1203F0/0x10C3A8
 öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
 host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur

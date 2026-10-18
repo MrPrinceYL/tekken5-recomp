@@ -499,6 +499,11 @@ struct State {
     fetch: Option<Fetch>,
     /// The profile whose packs Become loads after removing the old character.
     become_pack: Option<String>,
+    /// The player's team (Jin: 0), given to a character made by Become.
+    hero_team: i16,
+    /// The character made by Become (its team is held at `hero_team`: the game sets the
+    /// profile's after creating it).
+    become_hero: Option<u32>,
     /// No-clip: the position the mod holds the character in control at.
     noclip: Option<[f32; 3]>,
     /// Stage choice 0-4 (the stage select's), then devil_debug::EXTRA_STAGES.
@@ -697,6 +702,12 @@ fn become_step(m: &mut Machine, st: &mut State) {
             }
             let old_id = word(m, HERO_RECORD + 4);
             ram_write(m, HERO_RECORD + 4, 4, id as u64);
+            // The new hero gets its profile's team (an enemy's: it would hit neither enemies
+            // nor objects, headless 18.10.); it takes over the old player's.
+            let cd = char_data(m, old);
+            if cd != 0 {
+                st.hero_team = half(m, cd + 0x300A);
+            }
             if alive(m, old) {
                 request_thread_call(TASK_KILL, &[TASK_POOL as u64, old as u64]);
             }
@@ -786,6 +797,7 @@ fn become_step(m: &mut Machine, st: &mut State) {
         Become::Created { old_id, id, waited } => match man_of(m, id, 0) {
             Some(new) => {
                 retarget_cameras(m, 0, new);
+                st.become_hero = Some(new);
                 ps2_runtime::diag::log(format!("devil mod: became profile {id:#x} ({new:#x})"));
                 st.last = format!("now playing as {}", name(m, new));
                 st.become_step = Become::Idle;
@@ -855,6 +867,8 @@ pub fn update(m: &mut Machine, out: &mut String) {
         mod_top: None,
         fetch: None,
         become_pack: None,
+        hero_team: 0,
+        become_hero: None,
         stage: 0,
         stage_restore: 0,
         switched: None,
@@ -872,6 +886,14 @@ pub fn update(m: &mut Machine, out: &mut String) {
     for &t in &living {
         let pos = position(m, t);
         st.spawn.entry(t).or_insert(pos);
+    }
+    if let Some(h) = st.become_hero {
+        let cd = if alive(m, h) { char_data(m, h) } else { 0 };
+        if cd == 0 {
+            st.become_hero = None;
+        } else if half(m, cd + 0x300A) != st.hero_team && st.switched.is_none() {
+            ram_write(m, cd + 0x300A, 2, st.hero_team as u16 as u64);
+        }
     }
     // A switched-to character that died or was removed: give control back.
     if let Some((_, _, target, _, _)) = st.switched {
