@@ -68,6 +68,9 @@ fn mode() -> Option<Mode> {
 pub fn install() {
     if mode().is_some() {
         let _ = ps2_runtime::VBLANK_HOOK.set(hook);
+        // The mod menu's thread calls run where Devil Within's main loop (0x100118) calls
+        // 0x20F110 at the start of every frame.
+        ps2_runtime::kernel::THREAD_HOOK.store(0x0020_F110, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -88,6 +91,10 @@ fn hook(m: &mut Machine) {
     crate::devil_mod::update(m, &mut text);
     if let Ok(mut t) = MENU_TEXT.lock() {
         if *t != text {
+            // T5_DW_MENULOG=1: every change of the overlay into the log (headless runs).
+            if ps2_runtime::diag::enabled("T5_DW_MENULOG") {
+                ps2_runtime::diag::log(format!("devil overlay:\n{text}"));
+            }
             *t = text;
         }
     }

@@ -514,6 +514,9 @@ fn dispatch(c: &mut Ctx, addr: u32) -> bool {
     };
     match machine().lookup(a) {
         Some(f) => {
+            if a == kernel::THREAD_HOOK.load(Relaxed) {
+                kernel::run_thread_calls(c);
+            }
             f(c, a);
             true
         }
