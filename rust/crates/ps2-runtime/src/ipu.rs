@@ -31,6 +31,8 @@ pub struct Ipu {
     /// Bit position in the front qword.
     pub bp: u32,
     pub out: VecDeque<u128>,
+    /// Quantiser matrices as transmitted (zigzag order), applied by scan position like the
+    /// hardware (PCSX2 IPU_MultiISA quant_matrix[i]), also for the alternate scan.
     pub iq_intra: [u8; 64],
     pub iq_non: [u8; 64],
     pub vqclut: [u16; 16],
@@ -333,41 +335,53 @@ const NONLINEAR_Q: [i32; 32] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 44, 48, 52, 56, 64, 72, 80, 88, 96, 104, 112,
 ];
 
-fn idct_basis() -> &'static [[f64; 8]; 8] {
-    static B: OnceLock<[[f64; 8]; 8]> = OnceLock::new();
-    B.get_or_init(|| {
-        let mut b = [[0f64; 8]; 8];
-        for (x, row) in b.iter_mut().enumerate() {
-            for (u, v) in row.iter_mut().enumerate() {
-                let c = if u == 0 { (0.5f64).sqrt() } else { 1.0 };
-                *v = c * ((2 * x + 1) as f64 * u as f64 * std::f64::consts::PI / 16.0).cos() / 2.0;
-            }
-        }
-        b
-    })
-}
-
-/// Separable double-precision 8x8 inverse DCT (IEEE 1180 accurate), rounded.
+/// PCSX2 IDCT_Block (mpeg2dec integer IDCT, row pass into 16 bits, then columns), on a block
+/// in natural order; the result is spatial, natural order.
 fn idct(blk: &[i32; 64]) -> [i32; 64] {
-    let b = idct_basis();
-    let mut tmp = [0f64; 64];
-    for v in 0..8 {
-        for x in 0..8 {
-            let mut s = 0.0;
-            for u in 0..8 {
-                s += b[x][u] * blk[v * 8 + u] as f64;
-            }
-            tmp[v * 8 + x] = s;
+    const W1: i32 = 2841;
+    const W2: i32 = 2676;
+    const W3: i32 = 2408;
+    const W5: i32 = 1609;
+    const W6: i32 = 1108;
+    const W7: i32 = 565;
+    // Coefficient order of PCSX2's packed scan within a row / column.
+    const P: [usize; 8] = [0, 2, 4, 6, 1, 3, 5, 7];
+    fn bf(w0: i32, w1: i32, d0: i32, d1: i32) -> (i32, i32) {
+        let tmp = w0 * (d0 + d1);
+        (tmp + (w1 - w0) * d1, tmp - (w1 + w0) * d0)
+    }
+    let mut t = [0i16; 64];
+    for r in 0..8 {
+        let g = |k: usize| blk[r * 8 + P[k]];
+        let (d0, d2) = ((g(0) << 11) + 128, g(2) << 11);
+        let (t0, t1) = (d0 + d2, d0 - d2);
+        let (t2, t3) = bf(W6, W2, g(3), g(1));
+        let a = [t0 + t2, t1 + t3, t1 - t3, t0 - t2];
+        let (t0, t1) = bf(W7, W1, g(7), g(4));
+        let (t2, t3) = bf(W3, W5, g(5), g(6));
+        let (b0, b3) = (t0 + t2, t1 + t3);
+        let (t0, t1) = (t0 - t2, t1 - t3);
+        let b = [b0, ((t0 + t1) * 181) >> 8, ((t0 - t1) * 181) >> 8, b3];
+        for k in 0..4 {
+            t[r * 8 + k] = ((a[k] + b[k]) >> 8) as i16;
+            t[r * 8 + 7 - k] = ((a[k] - b[k]) >> 8) as i16;
         }
     }
     let mut out = [0i32; 64];
     for x in 0..8 {
-        for y in 0..8 {
-            let mut s = 0.0;
-            for v in 0..8 {
-                s += b[y][v] * tmp[v * 8 + x];
-            }
-            out[y * 8 + x] = s.round() as i32;
+        let g = |k: usize| t[P[k] * 8 + x] as i32;
+        let (d0, d2) = ((g(0) << 11) + 65536, g(2) << 11);
+        let (t0, t1) = (d0 + d2, d0 - d2);
+        let (t2, t3) = bf(W6, W2, g(3), g(1));
+        let a = [t0 + t2, t1 + t3, t1 - t3, t0 - t2];
+        let (t0, t1) = bf(W7, W1, g(7), g(4));
+        let (t2, t3) = bf(W3, W5, g(5), g(6));
+        let (b0, b3) = (t0 + t2, t1 + t3);
+        let (t0, t1) = ((t0 - t2) >> 8, (t1 - t3) >> 8);
+        let b = [b0, (t0 + t1) * 181, (t0 - t1) * 181, b3];
+        for k in 0..4 {
+            out[k * 8 + x] = ((a[k] + b[k]) >> 17) as i16 as i32;
+            out[(7 - k) * 8 + x] = ((a[k] - b[k]) >> 17) as i16 as i32;
         }
     }
     out
@@ -404,15 +418,18 @@ impl Ipu {
         let table = if intra && self.ctrl & (1 << 21) != 0 { &t.b15 } else { &t.b14 };
         let iq = if intra { self.iq_intra } else { self.iq_non };
         let mut first = !intra;
-        let mut sum = c[0];
         loop {
             let v = if first { t.b14_first.get(b)? } else { table.get(b)? };
             first = false;
             if v == EOB {
                 break;
             }
-            let (run, mut level);
+            // PCSX2 get_intra_block / get_non_intra_block: table codes are scaled by magnitude
+            // and the sign applied afterwards (rounds towards 0); escapes are scaled signed and
+            // shifted (rounds down).
+            let (run, level, neg);
             if v == ESC {
+                neg = false;
                 run = b.get(6)? as i32;
                 if mpeg1 {
                     let l = b.get(8)? as i32;
@@ -430,32 +447,29 @@ impl Ipu {
             } else {
                 run = v >> 16;
                 level = v & 0xFFFF;
-                if b.get(1)? == 1 {
-                    level = -level;
-                }
+                neg = b.get(1)? == 1;
             }
             i += run as usize;
             if i > 63 {
                 break;
             }
             let j = scan[i];
-            let w = iq[j] as i32;
+            let w = iq[i] as i32;
             let mut val = if intra {
                 if mpeg1 { (level * q * w) >> 3 } else { (level * q * w) >> 4 }
             } else {
-                let s = if level > 0 { 1 } else { -1 };
-                if mpeg1 { ((2 * level + s) * q * w) >> 4 } else { ((2 * level + s) * q * w) / 32 }
+                let s = if level >= 0 { 1 } else { -1 };
+                if mpeg1 { ((2 * level + s) * q * w) >> 4 } else { ((2 * level + s) * q * w) >> 5 }
             };
             if mpeg1 && val != 0 && val & 1 == 0 {
                 val -= val.signum();
             }
+            if neg {
+                val = -val;
+            }
             val = val.clamp(-2048, 2047);
             c[j] = val;
-            sum += val;
             i += 1;
-        }
-        if !mpeg1 && sum & 1 == 0 {
-            c[63] ^= 1;
         }
         Ok(c)
     }
@@ -486,7 +500,7 @@ impl Ipu {
                 for y in 0..8 {
                     for x in 0..8 {
                         let v = pix[y * 8 + x];
-                        let v = if intra { v.clamp(0, 255) } else { v.clamp(-256, 255) };
+                        let v = if intra { v.clamp(0, 255) } else { v };
                         let (o, stride) = if blk < 4 {
                             let bx = (blk & 1) * 8;
                             let row = if dt { (blk >> 1) + 2 * y } else { (blk >> 1) * 8 + y };
@@ -509,12 +523,14 @@ impl Ipu {
         Ok(out)
     }
 
+    /// The IPU's integer YCbCr -> RGB (PCSX2 yuv2rgb_reference, "the precise documented integer
+    /// method used by the hardware") and the TH0 / TH1 alpha thresholds (PCSX2 ipu_csc).
     fn rgb(&self, y: i32, cb: i32, cr: i32) -> (u8, u8, u8, u8) {
-        let yy = 1.164 * (y - 16) as f64;
-        let (cb, cr) = ((cb - 128) as f64, (cr - 128) as f64);
-        let r = (yy + 1.596 * cr).round().clamp(0.0, 255.0) as u32;
-        let g = (yy - 0.813 * cr - 0.391 * cb).round().clamp(0.0, 255.0) as u32;
-        let bl = (yy + 2.018 * cb).round().clamp(0.0, 255.0) as u32;
+        let lum = (0x95 * (y - 16).max(0)) >> 6;
+        let (cb, cr) = (cb - 128, cr - 128);
+        let r = ((lum + ((0xCC * cr) >> 6) + 1) >> 1).clamp(0, 255) as u32;
+        let g = ((lum + ((-0x68 * cr) >> 6) + ((-0x32 * cb) >> 6) + 1) >> 1).clamp(0, 255) as u32;
+        let bl = ((lum + ((0x102 * cb) >> 6) + 1) >> 1).clamp(0, 255) as u32;
         let a = if r < self.th0 && g < self.th0 && bl < self.th0 {
             0
         } else if r < self.th1 && g < self.th1 && bl < self.th1 {
@@ -525,9 +541,12 @@ impl Ipu {
         if a == 0 { (0, 0, 0, 0) } else { (r as u8, g as u8, bl as u8, a) }
     }
 
-    /// CSC: `count` RAW8 macroblocks (384 bytes each, read raw from the input) to RGB32 / RGB16.
+    /// CSC: `count` RAW8 macroblocks (384 bytes each, read raw from the input) to RGB32 / RGB16
+    /// (OFM, dithered with DTE: PCSX2 ipu_dither_reference).
     fn csc(&mut self, b: &mut Bits, cmd: u32) -> Result<Vec<u128>, NeedData> {
+        const DITHER: [[i32; 4]; 4] = [[-4, 0, -3, 1], [2, -2, 3, -1], [-3, 1, -4, 0], [3, -1, 2, -2]];
         let count = (cmd & 0x7FF) as usize;
+        let dte = cmd & (1 << 26) != 0;
         let rgb16 = cmd & (1 << 27) != 0;
         let mut out = Vec::new();
         for _ in 0..count {
@@ -544,8 +563,10 @@ impl Ipu {
             }
             if rgb16 {
                 let mut bytes = Vec::with_capacity(512);
-                for (r, g, bl, a) in px {
-                    let v = (r as u16 >> 3) | ((g as u16 >> 3) << 5) | ((bl as u16 >> 3) << 10) | (((a != 0) as u16) << 15);
+                for (k, (r, g, bl, a)) in px.into_iter().enumerate() {
+                    let d = if dte { DITHER[(k / 16) & 3][k & 3] } else { 0 };
+                    let q = |c: u8| ((c as i32 + d).clamp(0, 255) >> 3) as u16;
+                    let v = q(r) | (q(g) << 5) | (q(bl) << 10) | (((a == 0x40) as u16) << 15);
                     bytes.extend_from_slice(&v.to_le_bytes());
                 }
                 out.extend(bytes.chunks(16).map(|c| u128::from_le_bytes(c.try_into().unwrap())));
@@ -611,8 +632,8 @@ impl Ipu {
                 b.skip((cmd & 0x3F) as usize)?;
                 if op == 5 {
                     let mut m = [0u8; 64];
-                    for i in 0..64 {
-                        m[ZIGZAG[i]] = b.get(8)? as u8;
+                    for v in m.iter_mut() {
+                        *v = b.get(8)? as u8;
                     }
                     if cmd & (1 << 27) != 0 { self.iq_non = m } else { self.iq_intra = m }
                 } else {
@@ -914,5 +935,39 @@ pub fn dma_from(m: &mut Machine) {
         dmac::finish(m, ch);
     } else {
         m.ipu.from_waiting = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The integer IDCT stays within 1 of the exact transform (IEEE 1180 range inputs).
+    #[test]
+    fn idct_matches_reference() {
+        let mut seed = 12345u32;
+        let mut rnd = |m: i32| {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            ((seed >> 8) % (2 * m as u32 + 1)) as i32 - m
+        };
+        for _ in 0..2000 {
+            let mut blk = [0i32; 64];
+            for (k, v) in blk.iter_mut().enumerate() {
+                *v = if k < 10 { rnd(256) } else { rnd(5) };
+            }
+            let got = super::idct(&blk);
+            for y in 0..8 {
+                for x in 0..8 {
+                    let mut s = 0.0f64;
+                    for v in 0..8 {
+                        for u in 0..8 {
+                            let cu = if u == 0 { 0.5f64.sqrt() } else { 1.0 };
+                            let cv = if v == 0 { 0.5f64.sqrt() } else { 1.0 };
+                            let pi = std::f64::consts::PI;
+                            s += cu * cv / 4.0 * blk[v * 8 + u] as f64 * ((2 * x + 1) as f64 * u as f64 * pi / 16.0).cos() * ((2 * y + 1) as f64 * v as f64 * pi / 16.0).cos();
+                        }
+                    }
+                    assert!((got[y * 8 + x] - s.round() as i32).abs() <= 1, "{blk:?}");
+                }
+            }
+        }
     }
 }
