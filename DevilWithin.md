@@ -589,6 +589,10 @@ eigene Kodierung in **`cap_teg_msg_font_account`** (`base.pak`, Typ 5, Format �
   Belohnungsmeldungen 366–406: 20 Figuren × 2 + StarBlade). Die Meldungen wurden offenbar einmal
   neu nummeriert; der alte Block ist nicht mehr in der Datei.
 - `cap_teg_msg_font_arcade` enthält nur einen Platzhalter („a“).
+- **Alles gesammelt:** `python tools/dw_dev_texts.py ../Tekken5/extracted/tk5data2 ../Tekken5/devTextEtc`
+  schreibt nach `Decomps/Tekken5/devTextEtc/` (Spieldaten, nicht in Git): `story.txt` (Seiten wie im
+  Spiel), `messages_all.txt`, `menutext.txt`, Warplisten neu/alt, Sound-Konfiguration neu/alt,
+  `chr_000` neu/alt, Bilder (Zwischenspiel-Hintergrund, Anleitung, Schrift), `README.md`.
 
 ### Tastenabfragen / Easter Eggs (18.10.)
 Alle Abfragen des Pad-Zustands (0x2A98E0 gehalten, +4 gedrückt, +8 losgelassen; Pad 2 +0x64)
