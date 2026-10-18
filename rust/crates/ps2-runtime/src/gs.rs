@@ -453,6 +453,39 @@ impl Gs {
         }
     }
 
+    /// CSR.RESET: the general registers (both contexts, TEXA, PRMODE, transfer setup, ...) go
+    /// back to their power-on values; local memory stays (PCSX2 GSState::Reset). Without this a
+    /// program started after another (the loader after Tekken 5) drew with the previous
+    /// program's TEX1 (mipmapping) / TEXA / CLAMP.
+    fn reset_regs(&mut self) {
+        let n = Gs::new(); // rare (program start): the 4 MiB it allocates do not matter
+        self.ctx = n.ctx;
+        self.prim = n.prim;
+        self.prmode = n.prmode;
+        self.prmodecont = n.prmodecont;
+        self.rgbaq = n.rgbaq;
+        self.st = n.st;
+        self.uv = n.uv;
+        self.fog = n.fog;
+        self.texclut = n.texclut;
+        self.scanmsk = n.scanmsk;
+        self.texa = n.texa;
+        self.fogcol = n.fogcol;
+        self.dimx = n.dimx;
+        self.dthe = n.dthe;
+        self.colclamp = n.colclamp;
+        self.pabe = n.pabe;
+        self.bitbltbuf = n.bitbltbuf;
+        self.trxpos = n.trxpos;
+        self.trxreg = n.trxreg;
+        self.trxdir = n.trxdir;
+        self.reg_last = [0; 128];
+        self.reg_set = [false; 128];
+        self.verts.clear();
+        self.xfer_active = false;
+        self.xfer_pending.clear();
+    }
+
     // ---- local memory pixel access ----
 
     #[inline(always)]
@@ -1704,10 +1737,7 @@ impl Gs {
                 self.image_data(&d);
                 crate::raster::GS_US[3].fetch_add(t0.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
             }
-            GsCmd::Reset => {
-                self.verts.clear();
-                self.xfer_active = false;
-            }
+            GsCmd::Reset => self.reset_regs(),
             GsCmd::Vsync { pmode, smode2, dispfb, display, bgcolor, field } => {
                 self.pmode = pmode;
                 self.smode2 = smode2;
