@@ -1,3 +1,33 @@
+# Nutzerbericht 18.10.2026 (alte Liste laut Nutzer erledigt) – Reihenfolge = Priorität
+
+- [~] B17 Ladebildschirm beim Start von Devil Within / Arcade History: statt des leuchtenden
+      „NOW LOADING“ (rechts unten, orange Schrift mit rotem Glühen) nur ein dunkelrotes,
+      unscharfes Rechteck an derselben Stelle (Vergleichsbild PCSX2).
+      - Gezeichnet vom Lader (TK5DATA4, `loader`): `FUN_01e00f50` → sceGsResetGraph, Upload
+        `FUN_01e00d48` (200×48 CT24 nach TBP 0x3000, Daten 0x1E1D740 – im Sheet geprüft:
+        korrektes Bild), Sprite `FUN_01e00a88` (TEX0_1 = 0x2000000E64123000, PRIM 0x116) und
+        Abblend-Sprite `FUN_01e00c08`. Der Lader setzt TEX1/CLAMP/MIPTBP/TEXA NICHT selbst.
+      - **Ursache:** `GsCmd::Reset` (CSR.RESET) leerte nur die Vertexliste; die allgemeinen
+        Register blieben auf den Werten von Tekken 5 (TEX1 mit Mipmap/LOD bzw. CLAMP-Region) →
+        Textur als fast einfarbige Fläche gesampelt. PCSX2 `GSState::Reset` setzt alle
+        allgemeinen Register zurück. Fix 18.10.: `Gs::reset_regs` (Einschaltwerte aus
+        `Gs::new`, Speicher bleibt). Nutzertest offen.
+- [ ] B18 Devil Within: FPS fallen drastisch, wenn viele Gegner gleichzeitig erscheinen.
+- [~] B10 FMVs: Grafikartefakte in allen FMVs (Nutzer 18.10.: weiterhin).
+      Abgleich `ipu.rs` mit PCSX2 `IPU_MultiISA.cpp` (18.10.), Abweichungen behoben:
+      - Intra-AC: Betrag skaliert, Vorzeichen danach (Rundung zur 0); wir rundeten negative
+        Koeffizienten nach unten (±1 je Koeffizient, wird über P/B-Bilder weitergetragen).
+      - Non-Intra-Escape: `>> 5` statt `/ 32`.
+      - Quantisierungsmatrix wie übertragen, Index = Scan-Position (auch beim alternativen
+        Scan); wir sortierten nach Zickzack um → falsche Gewichte bei Alternate Scan.
+      - Keine MPEG-Mismatch-Korrektur (Koeffizient 63) und keine Klemmung der Non-Intra-
+        Residuen (PCSX2 hat beides nicht).
+      - IDCT = PCSX2 `IDCT_Block` (Integer, mpeg2dec) statt f64; Test `ipu::tests`.
+      - CSC = PCSX2 `yuv2rgb_reference` (Integer-Koeffizienten der Hardware), RGB16 mit
+        DTE-Dithering und Alpha-Bit = (Alpha == 0x40) wie `ipu_dither_reference`.
+      Nutzertest offen.
+- [ ] B13 FMVs: Ton manchmal asynchron zum Bild (Nutzer 18.10.: weiterhin).
+
 # Bugliste (Nutzerbericht 14.10.2026) + Prioritäten
 
 Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
