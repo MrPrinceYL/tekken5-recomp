@@ -539,7 +539,38 @@ mit englischen Namen und markiert Karten ohne Daten mit `[no data]` (bzw. `[no r
 (53–57) fehlt die Raumgeometrie.
 
 ## 4. Noch nicht untersucht
-- Inhalte der Textdateien (Dialoge, ungenutzte Texte) – hängt am Archiv (Abschnitt 3).
+- ~~Inhalte der Textdateien~~ → unten „Textdateien“ (18.10.).
+- ~~Easter Eggs~~ → unten „Tastenabfragen / Easter Eggs“ (18.10.).
+
+### Textdateien (18.10.)
+145 `.txt` in TK5DATA2 sind fast alle Dateilisten (Pakete, Skripte, Layouts); Spieltexte sind
+Grafiken (`cap_teg_msg_font_*`), Dialoge gibt es als Text nicht. Japanischer Klartext steht nur in
+`area/mpl.txt` (Warpliste) und `common/nus_config_ps2.txt` (Soundbusse, Kommentare). Funde:
+- **Sound-Konfiguration** (Ausgabe des Werkzeugs `Nus_Prog.xls` 1.73, 03.02.2005): Gruppen
+  `仁の声` (Jins Stimme), `敵の声` (Gegner), **`平八の声` (Heihachis Stimme)** → Boss 2 ist
+  namentlich Heihachi; **`2PVoice固定`** (feste Stimme für Spieler 2) neben `1PVoice固定` →
+  Hinweis auf einen Zweispielermodus (passt zum fehlenden Skript `bhb_mo_multi_start`).
+- **Editor-Sicherungen auf der Disc:** `common/nus_config_ps2.txt~` (Stand 25.01.2005, andere
+  Lautstärken und Busbelegung) und `area/chr/chr_000.txt~` (Figuren-Prüfraum lud damals
+  `snd_bg_lab_se` statt `snd_bg_egy_se`).
+- **Ältere Warpliste `area/mpl`** (ohne Endung, CSV mit Koordinaten x, y, z, Winkel statt
+  Wegpunkten): jedes Gebiet genau 6 Räume (1–4, 5 Boss, 6 Speicherraum), in Ägypten Raum 1 und 2
+  vertauscht (3-1 = `egy_A 2`); die späteren Zusatzräume 7–9 (Wendeltreppe 3-3a „螺旋“, 4-2b,
+  5-x) fehlen noch. Testkarten: szk 1–10, bgtest 1–4 (Yamauchi, inkl. Wald), matty 1–4, mine 1–2,
+  makino 1, effect 1, chr 1–2 – die Liste wuchs bis zur Endfassung (81 Einträge).
+- `common/item.txt`: Test-Item `itm_testA` (p00/p01) – Dateien fehlen.
+
+### Tastenabfragen / Easter Eggs (18.10.)
+Alle Abfragen des Pad-Zustands (0x2A98E0 gehalten, +4 gedrückt, +8 losgelassen; Pad 2 +0x64)
+durchsucht. Im normalen Spiel gibt es **keine** versteckten Tastenkombinationen (keine Abfrage
+mehrerer Tasten zugleich außer „irgendeine Aktionstaste“ beim Überspringen, 0x20A9A0: Kreis,
+Kreuz oder START). Mehrtasten-Abfragen stehen nur in den Debug-Menüs (Abschnitt 1) und in einem
+**ungenutzten Task-Monitor**: `0x20D780` (Task-Pool 0x2A9A30) bzw. `0x20D7A0` (Pool 0x2AA270) →
+0x20D618 läuft durch den Task-Baum (0x20D450), wählt per Steuerkreuz hoch/runter einen Task
+(R2 = Viererschritte, Kreis schaltet die Ansicht, Auswahl in `DAT_002aaab0`) und zeigt dessen
+Speicher als Hexdump (`+%03X:`, 0x20D1E8). Niemand ruft die beiden Einstiege auf; die
+Textausgabe ist wie bei den Debug-Menüs in der Verkaufsfassung stumm. Die bekannten Cheats sind
+die matty-Funktionen (Abschnitt 2b: Leben +30 %, COLLECT-Flags).
 - ~~Was STAGE SELECT / SELECT DEVIL / EXTRA-DEBUG anbieten~~ → Abschnitt 2b (Stage 0–4 der
   Namenstabelle 0x2B8558, Stufe 0–3, Modus 1/5/7).
 - ~~Ob `area/makino` ladbar ist~~ → ja, über MAP VIEWER (Eintrag 61) und die Stage-Selects (2b).
