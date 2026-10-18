@@ -1,8 +1,8 @@
 //! Devil Within mod menu (branch `devil/debug` only, opt-in with T5_DW_DEBUG): an in-game menu
 //! that changes guest data and calls guest functions. Not part of the 1:1 recompilation.
 //!
-//! SELECT held + L1 opens / closes it; with SELECT held: Up / Down entry, Left / Right value,
-//! CIRCLE run / toggle. Structures (DevilWithin.md, "Mod-Menü"):
+//! L3 + R3 opens / closes it; while open the pad drives only the menu (the game reads nothing,
+//! `pad::BLOCK`): Up / Down entry, Left / Right value, CIRCLE run / toggle. Structures (DevilWithin.md, "Mod-Menü"):
 //!
 //! - Characters ("man", 0x148400): tasks of type 1000 (+0x3C) in the task pool 0x2A9A30.
 //!   +0x140 input record index, +0x144 character data index, +0x148 AI, +0x154 bit 2 = AI
@@ -61,8 +61,16 @@ const REGISTER_PACK: u32 = 0x0010_A208;
 const UNLOAD_SLOT: u32 = 0x0010_A808;
 /// The slots the mod loads other areas' character packs into (the area loader uses 0..5 and,
 /// like it (0x12D7A0 states 5 / 9), puts a room's texture pack in the slot before its pack).
-const MOD_TEX_SLOT: u32 = 14;
-const MOD_SLOT: u32 = 15;
+/// Slots 9 / 10: free in every scene (the game uses 0-6 and 15; RAM 18.10.).
+const MOD_TEX_SLOT: u32 = 9;
+const MOD_SLOT: u32 = 10;
+/// The texture / model counters (0x10B098 / 0x10B528 hand out indices from them; a slot keeps
+/// their values from before its load at pack +0xC / +0xE, and unloading it (0x10B1C8 /
+/// 0x10B6E0) sets them back: a stack). Unloading the mod's slots after a later load (a room)
+/// would put them below that load's indices; then the mod keeps them (memcpy around the unload).
+const COUNTERS: u32 = 0x0041_AFD8;
+const MEMCPY: u32 = 0x0027_3034;
+const COUNTER_SAVE: u32 = PATH_BUFS + 11 * 0x100 + 0x80;
 /// The path buffer of a load slot (0x10C3A8 builds slot s's path at 0x425B80 + s * 0x100).
 const PATH_BUFS: u32 = 0x0042_5B80;
 /// Build a man's creation info (0x148A70: info, +0 value, profile id; +4 flags = 0).
@@ -127,18 +135,48 @@ fn model_loaded(m: &Machine, profile: &str) -> bool {
 }
 
 /// Pad 1 held buttons (0x2A9890 + 0x50).
-const PAD_HELD: u32 = 0x002A_98E0;
-const SELECT: u32 = 0x1;
+const L3: u32 = 0x2;
+const R3: u32 = 0x4;
 const UP: u32 = 0x10;
 const RIGHT: u32 = 0x20;
 const DOWN: u32 = 0x40;
 const LEFT: u32 = 0x80;
 const L2: u32 = 0x100;
 const R2: u32 = 0x200;
-const L1: u32 = 0x400;
-/// Pad 0's left stick as the game keeps it (0x101FC0: pad record 0x2A98A0, +0 x, +4 y, ints).
-const PAD_LX: u32 = 0x002A_98A0;
-const PAD_LY: u32 = 0x002A_98A4;
+/// Camera tasks (type 0x3EB, 0x1543C0); their data in the pool **0x42B6B4 (stride [0x42B6A8],
+/// count [0x42B6A2], index task +0x140; 0x152B78). Data +0xF0 = target task, +0xF4 = its
+/// serial (task +0): 0x154AD8 follows the target's +0x90 and drops a target whose serial no
+/// longer matches (a removed character).
+const CAMERA_TYPE: i16 = 0x3EB;
+
+fn camera_data(m: &Machine, task: u32) -> u32 {
+    let i = word(m, task + 0x140) as i32;
+    if i < 0 || half(m, 0x0042_B6A2) < 1 {
+        return 0;
+    }
+    word(m, word(m, 0x0042_B6B4)) + word(m, 0x0042_B6A8) * i as u32
+}
+
+/// Point the cameras that followed `from` (or lost their target) at `to`.
+fn retarget_cameras(m: &mut Machine, from: u32, to: u32) {
+    let mut t = word(m, TASK_POOL + 8);
+    for _ in 0..1024 {
+        if t == 0 {
+            break;
+        }
+        if half(m, t + 0x3C) == CAMERA_TYPE {
+            let c = camera_data(m, t);
+            if c != 0 {
+                let target = word(m, c + 0xF0);
+                if target == 0 || target == from || word(m, target) != word(m, c + 0xF4) {
+                    ram_write(m, c + 0xF0, 4, to as u64);
+                    ram_write(m, c + 0xF4, 4, word(m, to) as u64);
+                }
+            }
+        }
+        t = word(m, t + 0x18);
+    }
+}
 const CIRCLE: u32 = 0x2000;
 
 /// matty debug tree entries that run without arguments (0x356130..; DevilWithin.md).
@@ -262,18 +300,30 @@ enum Become {
 
 /// Load the room pack (and its texture pack) of a profile whose model is not loaded: per slot
 /// unload, load the file, register it (thread calls, one batch).
-fn load_pack(m: &mut Machine, pname: &str) -> Result<(), String> {
+fn load_pack(m: &mut Machine, st: &mut State, pname: &str) -> Result<(), String> {
     let base = model_base(pname);
     let Some(path) = pack_of(&base) else {
         return Err(format!("{pname}: no data on the disc"));
     };
     let tex = path.replace(".pak", "_tex.pak");
+    // Free the previous character's packs (last loaded first); the counters only go back when
+    // nothing was loaded after them.
+    let on_top = st.mod_top == Some((word(m, COUNTERS), word(m, COUNTERS + 4)));
+    if !on_top {
+        request_thread_call(MEMCPY, &[COUNTER_SAVE as u64, COUNTERS as u64, 8]);
+    }
+    request_thread_call(UNLOAD_SLOT, &[MOD_SLOT as u64]);
+    request_thread_call(UNLOAD_SLOT, &[MOD_TEX_SLOT as u64]);
+    if !on_top {
+        request_thread_call(MEMCPY, &[COUNTERS as u64, COUNTER_SAVE as u64, 8]);
+    }
+    st.mod_top = None;
+    st.mod_loading = true;
     for (slot, file) in [(MOD_TEX_SLOT, tex.as_str()), (MOD_SLOT, path)] {
         let buf = PATH_BUFS + slot * 0x100;
         for (i, b) in file.bytes().chain(std::iter::once(0)).enumerate() {
             ram_write(m, buf + i as u32, 1, b as u64);
         }
-        request_thread_call(UNLOAD_SLOT, &[slot as u64]);
         request_thread_call(LOAD_FILE, &[buf as u64]);
         request_thread_call(REGISTER_PACK, &[PREV_RESULT, slot as u64, 0]);
     }
@@ -335,6 +385,9 @@ struct State {
     spawning: bool,
     /// The characters before a spawn (the new one is the one not among them).
     before: Vec<u32>,
+    /// The counters right after the mod's packs were registered (they are on top while equal).
+    mod_top: Option<(u32, u32)>,
+    mod_loading: bool,
     /// No-clip: the position the mod holds the character in control at.
     noclip: Option<[f32; 3]>,
     /// Stage choice 0-4 (the stage select's), then devil_debug::EXTRA_STAGES.
@@ -343,10 +396,12 @@ struct State {
     stage_restore: u32,
     /// Active switch: (original player, its controller, target, the target's controller,
     /// the target's team before a swap).
-    switched: Option<(u32, i16, u32, i16, Option<i16>)>,
+    switched: Option<(u32, i16, u32, i16, Vec<(u32, i16)>)>,
     god: bool,
     devil: bool,
-    /// Give a switched-to character the player's team (it fights the others).
+    /// Teams on take over: the controlled character gets the player's team, every other
+    /// character (the original player too) the enemies' team; all hit each other like the
+    /// player and the enemies do.
     swap_team: bool,
     probe: bool,
     /// Saved position (man +0x90..0x98, the floats the hero record saves).
@@ -399,30 +454,47 @@ fn switch_to(m: &mut Machine, st: &mut State, target: u32) -> String {
     ram_write(m, rt, 2, 0);
     ram_write(m, rp, 2, 1);
     ram_write(m, slot, 4, target as u64);
-    let mut team = None;
+    let mut teams = Vec::new();
     if st.swap_team {
-        let (dp, dt) = (char_data(m, player), char_data(m, target));
-        if dp != 0 && dt != 0 {
-            team = Some(half(m, dt + 0x300A));
-            ram_write(m, dt + 0x300A, 2, half(m, dp + 0x300A) as u16 as u64);
+        let dp = char_data(m, player);
+        if dp != 0 {
+            let ours = half(m, dp + 0x300A);
+            let theirs = characters(m)
+                .into_iter()
+                .filter(|&t| t != player && char_data(m, t) != 0)
+                .map(|t| half(m, char_data(m, t) + 0x300A))
+                .find(|&t| t != ours)
+                .unwrap_or(1 - ours);
+            for t in characters(m) {
+                let d = char_data(m, t);
+                if d == 0 {
+                    continue;
+                }
+                teams.push((t, half(m, d + 0x300A)));
+                let team = if t == target { ours } else { theirs };
+                ram_write(m, d + 0x300A, 2, team as u16 as u64);
+            }
         }
     }
-    st.switched = Some((player, cp, target, ct, team));
+    st.switched = Some((player, cp, target, ct, teams));
+    retarget_cameras(m, player, target);
     ps2_runtime::diag::log(format!("devil mod: control {target:#x} (was {player:#x})"));
     format!("now controlling {}", name(m, target))
 }
 
 /// Undo a switch (if the original player still exists).
 fn restore(m: &mut Machine, st: &mut State) {
-    let Some((player, cp, target, ct, team)) = st.switched.take() else { return };
+    let Some((player, cp, target, ct, teams)) = st.switched.take() else { return };
+    for (t, team) in teams {
+        let d = if alive(m, t) { char_data(m, t) } else { 0 };
+        if d != 0 {
+            ram_write(m, d + 0x300A, 2, team as u16 as u64);
+        }
+    }
     if alive(m, target) {
         let rt = input_record(m, target);
         if rt != 0 {
             ram_write(m, rt, 2, ct as u16 as u64);
-        }
-        let dt = char_data(m, target);
-        if let (Some(team), true) = (team, dt != 0) {
-            ram_write(m, dt + 0x300A, 2, team as u16 as u64);
         }
     }
     if alive(m, player) {
@@ -434,6 +506,7 @@ fn restore(m: &mut Machine, st: &mut State) {
         if slot != 0 {
             ram_write(m, slot, 4, player as u64);
         }
+        retarget_cameras(m, target, player);
     }
 }
 
@@ -453,6 +526,10 @@ fn become_step(m: &mut Machine, st: &mut State) {
                 return;
             };
             if model_loaded(m, &pname) {
+                if st.mod_loading {
+                    st.mod_loading = false;
+                    st.mod_top = Some((word(m, COUNTERS), word(m, COUNTERS + 4)));
+                }
                 let old = player(m);
                 if old == 0 {
                     st.last = "no player in this scene".into();
@@ -541,6 +618,7 @@ fn become_step(m: &mut Machine, st: &mut State) {
         }
         Become::Created { old_id, id, waited } => match man_of(m, id, 0) {
             Some(new) => {
+                retarget_cameras(m, 0, new);
                 ps2_runtime::diag::log(format!("devil mod: became profile {id:#x} ({new:#x})"));
                 st.last = format!("now playing as {}", name(m, new));
                 st.become_step = Become::Idle;
@@ -605,6 +683,8 @@ pub fn update(m: &mut Machine, out: &mut String) {
         spawning: false,
         before: Vec::new(),
         noclip: None,
+        mod_top: None,
+        mod_loading: false,
         stage: 0,
         stage_restore: 0,
         switched: None,
@@ -649,21 +729,26 @@ pub fn update(m: &mut Machine, out: &mut String) {
             crate::devil_debug::set_stage0(m, None);
         }
     }
-    let held = word(m, PAD_HELD);
+    // The real pad (the game gets nothing while the menu is open): buttons, sticks RX RY LX LY.
+    let held = m.shared.pad.buttons[0].load(std::sync::atomic::Ordering::Relaxed) as u32;
+    let sticks = match m.shared.pad.sticks[0].load(std::sync::atomic::Ordering::Relaxed) {
+        0 => 0x8080_8080,
+        s => s,
+    };
     // No-clip: hold the character in control at the mod's position (no gravity, no walls),
     // left stick moves it along world x / z (0.25 m per frame at full tilt), R2 / L2 up /
-    // down; not while SELECT is held (menu).
+    // down; not while the menu is open.
     if let Some(mut pos) = st.noclip {
         if p == 0 {
             st.noclip = None;
         } else {
-            if held & SELECT == 0 {
-                let axis = |a: u32| {
-                    let v = (word(m, a) as i32 as f32 / 128.0).clamp(-1.0, 1.0);
+            if !st.open {
+                let axis = |shift: u32| {
+                    let v = (((sticks >> shift) & 0xFF) as f32 - 128.0) / 128.0;
                     if v.abs() < 0.2 { 0.0 } else { v }
                 };
-                pos[0] += axis(PAD_LX) * 25.0;
-                pos[2] += axis(PAD_LY) * 25.0;
+                pos[0] += axis(16) * 25.0;
+                pos[2] += axis(24) * 25.0;
                 if held & R2 != 0 {
                     pos[1] += 25.0;
                 }
@@ -677,9 +762,10 @@ pub fn update(m: &mut Machine, out: &mut String) {
     }
     let new = held & !st.prev_held;
     st.prev_held = held;
-    if held & SELECT != 0 && new & L1 != 0 {
+    if held & (L3 | R3) == L3 | R3 && new & (L3 | R3) != 0 {
         st.open = !st.open;
     }
+    ps2_runtime::pad::BLOCK.store(st.open, std::sync::atomic::Ordering::Relaxed);
     if !st.open {
         return;
     }
@@ -692,7 +778,7 @@ pub fn update(m: &mut Machine, out: &mut String) {
         st.profile = 0;
     }
     let entry = ENTRIES[st.cur];
-    if held & SELECT != 0 {
+    {
         if new & UP != 0 {
             st.cur = (st.cur + ENTRIES.len() - 1) % ENTRIES.len();
         }
@@ -725,7 +811,7 @@ pub fn update(m: &mut Machine, out: &mut String) {
                             st.become_step = Become::Loading { profile: st.profile, waited: 0 };
                             format!("becoming {pname} ...")
                         } else {
-                            match load_pack(m, &pname) {
+                            match load_pack(m, st, &pname) {
                                 Ok(()) => {
                                     st.become_step = Become::Loading { profile: st.profile, waited: 0 };
                                     format!("loading {pname} ...")
@@ -830,6 +916,7 @@ pub fn update(m: &mut Machine, out: &mut String) {
                 },
                 Entry::Close => {
                     st.open = false;
+                    ps2_runtime::pad::BLOCK.store(false, std::sync::atomic::Ordering::Relaxed);
                     String::new()
                 }
             };
@@ -842,10 +929,7 @@ pub fn update(m: &mut Machine, out: &mut String) {
             let note = if model_loaded(m, &p.2) {
                 ""
             } else if pack_of(&model_base(&p.2)).is_some() {
-                // Loaded and playable, but enemies' meshes/textures live in their room's texture
-                // bundle (nut_<room>), which the texture manager does not take besides the
-                // current room's: the model is not drawn (headless test 18.10., shadow only).
-                " [other area: playable, model not drawn]"
+                " [other area: loads its pack]"
             } else {
                 " [no data on the disc]"
             };
@@ -900,5 +984,5 @@ pub fn update(m: &mut Machine, out: &mut String) {
     if !st.last.is_empty() {
         out.push_str(&format!("{}\n", st.last));
     }
-    out.push_str("--\nhold SELECT (Tab) +  Up/Down: entry   Left/Right: choose   CIRCLE (C): run   L1: close\n\n");
+    out.push_str("--\nUp/Down: entry   Left/Right: choose   CIRCLE (C): run   L3+R3: close (the game gets no input while open)\n\n");
 }

@@ -169,8 +169,10 @@ Wiedereinstieg 0x1034A0 auslösen würde) → nächstes hoch/runter = Endlosschl
 
 ## 2b. Mod-Menü (nur Branch `devil/debug`, nur mit `T5_DW_DEBUG`, nicht 1:1)
 
-`t5-recomp/src/devil_mod.rs`. Öffnen/Schließen: SELECT halten + L1; mit SELECT gehalten:
-hoch/runter Eintrag, links/rechts Auswahl, KREIS ausführen.
+`t5-recomp/src/devil_mod.rs`. Öffnen/Schließen: **L3 + R3** (Tastatur F + G). Solange das Menü
+offen ist, bekommt das Spiel keine Eingabe (`ps2_runtime::pad::BLOCK`: Port 1 liest „nichts
+gedrückt, Sticks Mitte“, die Mod liest das echte Pad); hoch/runter Eintrag, links/rechts
+Auswahl, KREIS ausführen.
 
 **Belegte Strukturen** (Funktionsnamen aus den Debug-Strings der Bibliothek `tsEHpMan*`):
 - Figuren („man“, erzeugt von 0x148400 → 0x148070): Tasks Typ 1000 (+0x3C) im Task-Pool;
@@ -218,7 +220,29 @@ existiert) → erscheint keine Figur, wird die alte aus demselben Datensatz neu 
 Verfügbarkeit: Modell `obj_obj_<name>` in einem geladenen Paket (Lade-Slots [0x41AF98] + s*0x4C,
 +0x144 = Handle → BDPK-Daten). Overlay markiert andere Profile mit `[not loaded here]`.
 
-**Figuren anderer Gebiete (Stand 18.10., headless geprüft):** Der Listen-Lader 0x1203F0/0x10C3A8
+**Kamera (18.10.):** Kamera-Tasks Typ 0x3EB, Daten im Pool **0x42B6B4[task+0x140] (0x152B78);
++0xF0 Ziel-Task, +0xF4 dessen Seriennummer (Task +0). 0x154AD8 folgt man +0x90 des Ziels und
+verwirft ein Ziel mit falscher Seriennummer (entfernte Figur). Become/Take over/Back setzen
+das Ziel der Kameras, die der alten Figur folgten oder ihr Ziel verloren haben, auf die neue
+(`retarget_cameras`); vorher blieb die Kamera nach Become stehen (Nutzertest).
+
+**Teams bei Take over (18.10., headless):** gesteuerte Figur = Spielerteam, alle anderen
+(auch der bisherige Spieler) = Gegnerteam (Figurdaten +0x300A); Rückweg stellt alle Teams wieder
+her. Beleg: übernommener Soldat schlägt Jin (Leben 475 → 265), vorher traf der KI-Soldat Jin.
+Grenze: Der zurückgelassene Jin hat keine KI (der Held hat keine), er steht nur da.
+
+**Figuren anderer Gebiete – gelöst (18.10.):** Ursache war der Slot: Slot 15 belegt das
+Spiel selbst (früh geladen, unterstes Element des Stapels). Textur- und Modellindizes kommen aus
+zwei Zählern (0x41AFD8 / 0x41AFDC), jeder Slot merkt sich ihren Stand vor seinem Laden (Paket
++0xC / +0xE) und Entladen setzt sie darauf zurück (0x10B1C8 / 0x10B6E0) – ein Stapel. Mein
+Entladen von Slot 15 setzte die Zähler auf 0, die Modelle wurden nicht registriert (Index −1 an
+Eintrag +0x58). Jetzt: Slots 9/10 (immer frei), Entladen nur oben auf dem Stapel mit Rücksetzen,
+sonst Zähler per Spiel-`memcpy` (0x273034) um das Entladen herum gesichert. Ergebnis: Monster
+in Labor A, Soldat aus `lab_A_003` korrekt texturiert. Die `mon_*`-Monster sind auch im eigenen
+Gebiet hellgrau (Vergleichsbild Blaue Ruinen), das ist ihr Aussehen. Texturen sind TIM2 mit
+`GIDX`-Kennung; Gebiete überschneiden sich darin kaum (4 gemeinsame).
+
+**Figuren anderer Gebiete (Stand vorher, überholt):** Der Listen-Lader 0x1203F0/0x10C3A8
 öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
 host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur
 selbst: `0x20EA98(pfad)` (synchron, `sim:romdata/` wird über das Verzeichnis auf TK5DATA2

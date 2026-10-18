@@ -54,6 +54,8 @@ pub mod script {
                     "LEFT" => ps2_runtime::pad::LEFT,
                     "RIGHT" => ps2_runtime::pad::RIGHT,
                     "SELECT" => ps2_runtime::pad::SELECT,
+                    "L3" => ps2_runtime::pad::L3,
+                    "R3" => ps2_runtime::pad::R3,
                     "SQUARE" => ps2_runtime::pad::SQUARE,
                     "TRIANGLE" => ps2_runtime::pad::TRIANGLE,
                     "L1" => ps2_runtime::pad::L1,
