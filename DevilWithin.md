@@ -198,27 +198,43 @@ hoch/runter Eintrag, links/rechts Auswahl, KREIS ausführen.
 - **Position probe:** zeigt Kandidaten der Position (Matrix +0x30, Yaw, obj+0x16C) – Grundlage für
   Teleport/No-Clip.
 
-**Figurenwahl aus allen Figuren (Nutzerwunsch, nicht nur übernehmen):** Weg im Spiel gefunden,
-noch nicht gebaut: 0x120358(id) = Figurenprofil (Tabelle [0x41B450]+0x48, Anzahl +0x44, 0x80 Byte
-je Profil, +4 ID, +0x40 Name `chr_*`); 0x1203F0(1, profil) lädt `list/<name>.txt` (Modell,
-Bewegungen, KI; asynchron über 0x10CBE0); 0x148BC0(datensatz, 0) erzeugt die Figur als Spieler aus
-einem Datensatz {+4 Profil-ID, +0xC/+0x10/+0x14 Position, +0x18 Yaw, +0x1C Leben, +0x20 Max,
-+0x24 Devil-Leiste}. So stellt das Spiel Jin wieder her (0x135B20, Profil 0x31E) und lädt der
-„Gimmick Viewer“ (0x1E0EC0) eine Figur. Nötig: Gast-Aufrufe mit Argumenten und Rückgabewert, ein
-Datensatz im Gastspeicher, Warten auf das Laden, Jin entfernen (0x20B428). Offen: ob die
-`list/`-Dateien Daten aus nicht geladenen Gebietspaketen nachladen (die Figurendateien liegen in
-den Paketen ihrer Gebiete).
+**Stand 18.10. (headless geprüft, `run/dwmod.sh`, `T5_DW_MENULOG=1` schreibt das Overlay ins Log):**
 
-**Noch nicht gebaut (Begründung):**
-- Teleport / No-Clip: maßgebliche Position nicht belegt (Matrix +0x70 vs. Bewegungs-Engine
-  0x165F80/0x16D728); erst Messung mit „Position probe“ im Spiel.
-- Spawn Gegner/Bosse/Objekte/Items: Erzeugung 0x148400 braucht einen Spawn-Datensatz aus den
-  Ereignisdaten und im Raum geladene Figurdaten; dafür Ereignisweg `EV_TYPE_OBJ`/`init_obj`
-  analysieren und Gast-Aufrufe mit Argumenten.
-- Stage select: vorhanden im Debug-Titelmenü (`T5_DW_DEBUG=title` → STAGE SELECT).
-- Figuren aus dem normalen Tekken 5 (z. B. Kazuya): andere Engine und Formate (TK5DATA0/1) –
-  Portierung nicht machbar ohne eigenes Großprojekt; nächstliegend: boss2 (Kazuya-/Heihachi-
-  Bewegungen) per Switch character.
+| Eintrag | Stand | Beleg |
+|---|---|---|
+| **Become** (Figur per Profil, 60 Profile aus `char_prof.bin`) | **funktioniert** für Figuren, deren Modell im aktuellen Gebiet geladen ist | Devil Jin (0x33A) und Soldat `chr_tk_standard1_lv1` (0x33E) in Labor A spielbar (Bilder), Boss 1 korrekt abgelehnt |
+| Take over (Gegner übernehmen) | gebaut, Eingabeweg belegt | Figurenliste korrekt (Typ 1000) |
+| Teleport: Save/Load position, to spawn | **funktioniert** | Position = Figur-Task +0x90/+0x94/+0x98; Schreiben setzt die Figur zurück, Matrix folgt |
+| Unlimited health / devil gauge | gebaut | Felder über tsEHpMan-Funktionen belegt |
+| Restore 30%, Set/Clear COLLECT | gebaut (matty-Funktionen) | |
+
+**Become, Ablauf** (`devil_mod::become_step`): Prüfmarke im Helden-Datensatz löschen → Spiel
+schreibt ihn (0x146D98(man) → 0x42B610) → Profil-ID tauschen → alte Figur entfernen (0x20B428)
+→ neue erzeugen (0x148BC0(record, 0) → 0x148968 → 0x148400; schlägt fehl, solange ein Held
+existiert) → erscheint keine Figur, wird die alte aus demselben Datensatz neu erzeugt.
+Verfügbarkeit: Modell `obj_obj_<name>` in einem geladenen Paket (Lade-Slots [0x41AF98] + s*0x4C,
++0x144 = Handle → BDPK-Daten). Overlay markiert andere Profile mit `[not loaded here]`.
+
+**Warum nicht jede Figur überall:** Der Listen-Lader 0x1203F0/0x10C3A8 öffnet
+`host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
+host0:romdata/list/chr_boss1.txt: not found“). In der Verkaufsversion kommen Figurendaten nur
+aus den Raumpaketen des gespielten Gebiets (Jin und Devil Jin immer aus `base.pak`). Für Figuren
+anderer Gebiete müsste deren Raumpaket zusätzlich geladen werden (Raum-Lader 0x12D7A0:
+0x10A1A0(puffer, pfad, slot, 3, callback) → 0x10A208 registriert; braucht freien Speicher und
+Slot) – nicht gebaut.
+
+**Noch nicht gebaut:**
+- No-Clip (Kamera/Figur): Kollision nicht untersucht; Position belegt (+0x90), Teleport geht.
+- Spawn Gegner/Bosse/Objekte/Items: Gegner entstehen über 0x148400 mit Spawn-Daten aus den
+  Ereignisdateien (KI-Flag, Startobjekt); nicht untersucht. Figuren anderer Gebiete bräuchten
+  deren Raumpakete (s. o.).
+- Stage select: im Debug-Titelmenü (`T5_DW_DEBUG=title` → STAGE SELECT) vorhanden.
+- Figuren aus dem normalen Tekken 5 (z. B. Kazuya): andere Engine und Formate (TK5DATA0/1).
+
+**Laufzeit-Erweiterungen dafür:** `kernel::request_guest_call(_args)` (Interrupt-Kontext, nicht
+für Funktionen, die warten: „WaitSema outside a thread“) und `kernel::request_thread_call`
+(Spiel-Thread, ausgeführt im Dispatcher vor `THREAD_HOOK` = 0x20F110, den Devil Withins
+Hauptschleife 0x100118 zu Beginn jedes Bildes ruft; Register gesichert/wiederhergestellt).
 
 ## 3. Dateiverzeichnis (Testinhalte, ungenutzte Dateien)
 
