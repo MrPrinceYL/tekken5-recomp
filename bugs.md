@@ -12,7 +12,17 @@
         Textur als fast einfarbige Fläche gesampelt. PCSX2 `GSState::Reset` setzt alle
         allgemeinen Register zurück. Fix 18.10.: `Gs::reset_regs` (Einschaltwerte aus
         `Gs::new`, Speicher bleibt). Nutzertest offen.
-- [ ] B18 Devil Within: FPS fallen drastisch, wenn viele Gegner gleichzeitig erscheinen.
+- [~] B18 Devil Within: FPS fallen drastisch, wenn viele Gegner gleichzeitig erscheinen.
+      - Profil im Fenster (Nutzer 18.10., `T5_PROFILE=300`, 60 s, viele Gegner): GAME FRAMES
+        180–265 / 5 s, MTVU-Worker 3,1–4,1 s / 5 s belegt (~15–16 ms je gerendertem Bild, an
+        der 16,7-ms-Grenze → Spiel lässt Bilder aus). VU1 ~300 Mio. Paare / 5 s in ~2,8 s =
+        ~9 ns/Paar (Tekken 5 mit Shapes 2–4). VU0 nur ~10 Mio. Paare / 5 s → VU0-Verdacht widerlegt.
+      - Proben: ein Block `b_ff6c92a801f38dd3` 20,8 %, `b_fedf571207feda51` 6 %, weitere b_…;
+        **alle heißen Blöcke ohne Eintritts-Shapes** im Sheet → generischer Blockpfad. Die
+        statische Verfolgung (`--collect-elf devil`) erreicht diesen Bereich von `.vutext`
+        nicht (auch die Vorgänger sind ohne Shape; Einstieg vermutlich per JR/JALR bzw. als
+        Overlay). Nächster Schritt: Shapes im Fenster sammeln (`T5_VUSHAPES=1`, Szene mit
+        vielen Gegnern) → `gen_vu.py --collect-shapes rust/vu_dumps/shapes.txt` → `gen_vu.py`.
 - [~] B10 FMVs: Grafikartefakte in allen FMVs (Nutzer 18.10.: weiterhin).
       Abgleich `ipu.rs` mit PCSX2 `IPU_MultiISA.cpp` (18.10.), Abweichungen behoben:
       - Intra-AC: Betrag skaliert, Vorzeichen danach (Rundung zur 0); wir rundeten negative
