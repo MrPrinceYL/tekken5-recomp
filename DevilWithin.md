@@ -242,6 +242,19 @@ in Labor A, Soldat aus `lab_A_003` korrekt texturiert. Die `mon_*`-Monster sind 
 Gebiet hellgrau (Vergleichsbild Blaue Ruinen), das ist ihr Aussehen. Texturen sind TIM2 mit
 `GIDX`-Kennung; Gebiete überschneiden sich darin kaum (4 gemeinsame).
 
+**Absturz beim zweiten Become aus fremdem Paket (Nutzerbericht 18.10., behoben):** Zwei Ursachen.
+(1) Der Heap (0x20C458, Freiliste `*[0x41E6C0]+0xC`, Knoten {+0 Daten, +4 Größe, +0x20 nächster})
+endet bei zu wenig Speicher in einer Endlosschleife; zwei Paketsätze (~2,4 MB je Paket) passen
+nicht nebeneinander. (2) Das Öffnen einer Datei, während die Disc beschäftigt ist, wartet in einer
+Schleife, die in einem Thread-Aufruf nicht endet (synchrones 0x20EA98 wie asynchrones 0x20ECB8
+hingen beim zweiten Mal). Jetzt: Become sichert den Helden, entfernt die alte Figur, entlädt
+dann das Mod-Paket (Slots 9/10) und lädt das neue; die Dateien liest die Mod selbst aus dem
+Disc-Image (TK5DATA2-Verzeichnis im RAM 0x362900, Namen 0x363D60) in einen Spiel-Heapblock
+(Größe vorher gegen den größten freien Block geprüft; Texturpaket wird erst nach seiner
+Registrierung klein, deshalb Pause davor). Scheitert etwas, kommt Jin zurück. Spawn aus fremdem
+Paket und Become sind gesperrt, solange eine lebende gespawnte Figur das Mod-Paket nutzt.
+Headless: Monster → Soldat (lab_A_003) → Jin ohne Absturz, Bilder korrekt.
+
 **Figuren anderer Gebiete (Stand vorher, überholt):** Der Listen-Lader 0x1203F0/0x10C3A8
 öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
 host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur

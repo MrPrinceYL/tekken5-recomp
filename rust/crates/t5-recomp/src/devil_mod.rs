@@ -52,16 +52,13 @@ const TASK_KILL: u32 = 0x0020_B428;
 /// Pack load slots (0x10C3A8): [0x41AF98] + slot * 0x4C; free while +0x141 (loaded, 0x10A060)
 /// and +0x144 (pack) are 0. 16 slots.
 const LOAD_SLOTS: u32 = 0x0041_AF98;
-/// Load a file from TK5DATA2 synchronously (0x20E9B8 with "sim:romdata/", which 0x20E4C0 maps
-/// to the archive's directory); returns a heap handle (*handle = data).
-const LOAD_FILE: u32 = 0x0020_EA98;
 /// Register a loaded BDPK pack in a load slot (0x109F80): (handle, slot, flag).
 const REGISTER_PACK: u32 = 0x0010_A208;
 /// Unload a load slot (what the area loader 0x12D7A0 does before reusing one).
 const UNLOAD_SLOT: u32 = 0x0010_A808;
-/// The slots the mod loads other areas' character packs into (the area loader uses 0..5 and,
-/// like it (0x12D7A0 states 5 / 9), puts a room's texture pack in the slot before its pack).
-/// Slots 9 / 10: free in every scene (the game uses 0-6 and 15; RAM 18.10.).
+/// The slots the mod loads other areas' character packs into: texture pack, then pack (the area
+/// loader 0x12D7A0 states 5 / 9 does the same); free in every scene (the game uses 0-6 and 15;
+/// RAM 18.10.).
 const MOD_TEX_SLOT: u32 = 9;
 const MOD_SLOT: u32 = 10;
 /// The texture / model counters (0x10B098 / 0x10B528 hand out indices from them; a slot keeps
@@ -71,6 +68,47 @@ const MOD_SLOT: u32 = 10;
 const COUNTERS: u32 = 0x0041_AFD8;
 const MEMCPY: u32 = 0x0027_3034;
 const COUNTER_SAVE: u32 = PATH_BUFS + 11 * 0x100 + 0x80;
+/// The pack files are not loaded by the game's file functions: opening a file while the disc is
+/// busy waits in a loop that does not end inside a thread call (the synchronous 0x20EA98 hung the
+/// game, headless 18.10.). The mod reads them from the disc image itself (TK5DATA2 directory in
+/// RAM: 0x146 entries {checksum, name offset into 0x363D60, offset, size} at 0x362900) into a
+/// block of the game's heap (0x20C458(name, size) -> handle {data, size, ..}).
+const ALLOC: u32 = 0x0020_C458;
+const FILE_DIR: u32 = 0x0036_2900;
+const FILE_NAMES: u32 = 0x0036_3D60;
+const FILE_COUNT: u32 = 0x146;
+/// The heap (0x20C458): *[0x41E6C0] + 0xC = first free block {+0 data, +4 size, +0x20 next}.
+/// An allocation it cannot serve ends in an endless loop, so the mod checks first.
+const HEAP: u32 = 0x0041_E6C0;
+/// The thread calls give the mod no return value: the handle goes through the texture group
+/// word (0x2164C0 sets it, the game keeps it 0 outside registrations) into HANDLES.
+const SET_GROUP: u32 = 0x0021_64C0;
+const GROUP: u32 = 0x003B_8640;
+const HANDLES: u32 = PATH_BUFS + 11 * 0x100 + 0x90;
+const JIN: u32 = 0x31E;
+
+/// A file of TK5DATA2: (byte offset in the disc image, size).
+fn disc_file(m: &Machine, path: &str) -> Option<(u64, u32)> {
+    let (lba, _) = m.disc.as_ref()?.find("TK5DATA2.BIN")?;
+    (0..FILE_COUNT).map(|i| FILE_DIR + i * 16).find(|&e| cstr(m, FILE_NAMES + word(m, e + 4)) == path).map(|e| {
+        (lba as u64 * 2048 + word(m, e + 8) as u64, word(m, e + 12))
+    })
+}
+
+/// The largest free block of the game's heap.
+fn heap_free(m: &Machine) -> u32 {
+    let mut b = word(m, word(m, HEAP) + 0xC);
+    let mut best = 0;
+    for _ in 0..4096 {
+        if b == 0 {
+            break;
+        }
+        best = best.max(word(m, b + 4));
+        b = word(m, b + 0x20);
+    }
+    best
+}
+
 /// The path buffer of a load slot (0x10C3A8 builds slot s's path at 0x425B80 + s * 0x100).
 const PATH_BUFS: u32 = 0x0042_5B80;
 /// Build a man's creation info (0x148A70: info, +0 value, profile id; +4 flags = 0).
@@ -117,20 +155,31 @@ fn model_base(profile: &str) -> String {
 /// `host0:romdata/list/<name>.txt` on the developers' PC; character data comes only from the
 /// packs of the area being played (Jin and Devil Jin from common/base.pak).
 fn model_loaded(m: &Machine, profile: &str) -> bool {
+    (0..16).any(|s| slot_has_model(m, s, profile))
+}
+
+/// Whether load slot `s` holds the model of `profile`.
+fn slot_has_model(m: &Machine, s: u32, profile: &str) -> bool {
     let want = format!("obj_obj_{}", model_base(profile));
-    let slots = word(m, LOAD_SLOTS);
-    (0..16).any(|s| {
-        // +0x144 is a handle whose first word points at the pack data (0x109F80).
-        let h = word(m, slots + s * 0x4C + 0x144);
-        let pak = if h != 0 { word(m, h) } else { 0 };
-        if pak == 0 || word(m, pak) != 0x4B50_4442 {
-            return false;
-        }
-        let n = word(m, pak + 4).min(4096);
-        (0..n).any(|i| {
-            let e = pak + 0x80 * (i + 1);
-            half(m, e) as u16 == 0x4442 && cstr(m, e + 0x14) == want
-        })
+    // +0x144 is a handle whose first word points at the pack data (0x109F80).
+    let h = word(m, word(m, LOAD_SLOTS) + s * 0x4C + 0x144);
+    let pak = if h != 0 { word(m, h) } else { 0 };
+    if pak == 0 || word(m, pak) != 0x4B50_4442 {
+        return false;
+    }
+    let n = word(m, pak + 4).min(4096);
+    (0..n).any(|i| {
+        let e = pak + 0x80 * (i + 1);
+        half(m, e) as u16 == 0x4442 && cstr(m, e + 0x14) == want
+    })
+}
+
+/// Whether a living character other than `except` uses a model of the mod's pack.
+fn mod_pack_in_use(m: &Machine, except: u32) -> bool {
+    let profs = profiles(m);
+    characters(m).into_iter().filter(|&t| t != except).any(|t| {
+        let id = half(m, t + 0x160) as u16 as u32;
+        profs.iter().filter(|p| p.0 == id).any(|p| slot_has_model(m, MOD_SLOT, &p.2))
     })
 }
 
@@ -293,21 +342,34 @@ enum Become {
     /// Waiting for the character's room pack (loaded in thread context into MOD_SLOT).
     Loading { profile: usize, waited: u32 },
     Saved { old: u32, id: u32, waited: u32 },
+    /// Become with a pack to load: the old character is gone, the packs are loading.
+    Fetching { id: u32, waited: u32 },
     /// Spawn: waiting for MAN_INFO to fill SPAWN_INFO.
     SpawnInfo { old: u32, id: u32, waited: u32 },
     Created { old_id: u32, id: u32, waited: u32 },
 }
 
-/// Load the room pack (and its texture pack) of a profile whose model is not loaded: per slot
-/// unload, load the file, register it (thread calls, one batch).
-fn load_pack(m: &mut Machine, st: &mut State, pname: &str) -> Result<(), String> {
-    let base = model_base(pname);
-    let Some(path) = pack_of(&base) else {
+/// Loading a character's room pack (and texture pack) into the mod's slots.
+struct Fetch {
+    /// (slot, byte offset in the image, size), texture pack first.
+    files: [(u32, u64, u32); 2],
+    /// The file being loaded; 2 = both registered.
+    k: usize,
+    /// Vblanks to wait before the first allocation (the unloads run first).
+    delay: u32,
+    requested: bool,
+}
+
+/// Start loading the packs of `pname`: unload the mod's slots (pack first, the stack order; the
+/// counters only go back when nothing was loaded after them), then one file per step.
+fn start_fetch(m: &mut Machine, st: &mut State, pname: &str) -> Result<(), String> {
+    let Some(path) = pack_of(&model_base(pname)) else {
         return Err(format!("{pname}: no data on the disc"));
     };
     let tex = path.replace(".pak", "_tex.pak");
-    // Free the previous character's packs (last loaded first); the counters only go back when
-    // nothing was loaded after them.
+    let (Some(ft), Some(fp)) = (disc_file(m, &tex), disc_file(m, path)) else {
+        return Err(format!("{pname}: {path} not found in TK5DATA2"));
+    };
     let on_top = st.mod_top == Some((word(m, COUNTERS), word(m, COUNTERS + 4)));
     if !on_top {
         request_thread_call(MEMCPY, &[COUNTER_SAVE as u64, COUNTERS as u64, 8]);
@@ -318,17 +380,64 @@ fn load_pack(m: &mut Machine, st: &mut State, pname: &str) -> Result<(), String>
         request_thread_call(MEMCPY, &[COUNTERS as u64, COUNTER_SAVE as u64, 8]);
     }
     st.mod_top = None;
-    st.mod_loading = true;
     for (slot, file) in [(MOD_TEX_SLOT, tex.as_str()), (MOD_SLOT, path)] {
         let buf = PATH_BUFS + slot * 0x100;
         for (i, b) in file.bytes().chain(std::iter::once(0)).enumerate() {
             ram_write(m, buf + i as u32, 1, b as u64);
         }
-        request_thread_call(LOAD_FILE, &[buf as u64]);
-        request_thread_call(REGISTER_PACK, &[PREV_RESULT, slot as u64, 0]);
     }
+    st.fetch = Some(Fetch { files: [(MOD_TEX_SLOT, ft.0, ft.1), (MOD_SLOT, fp.0, fp.1)], k: 0, delay: 2, requested: false });
     ps2_runtime::diag::log(format!("devil mod: loading {tex} + {path} for {pname} into slots {MOD_TEX_SLOT}/{MOD_SLOT}"));
     Ok(())
+}
+
+/// One step of a fetch: Ok(true) when both packs are registered (or queued for it).
+fn drive_fetch(m: &mut Machine, st: &mut State) -> Result<bool, String> {
+    let Some(f) = st.fetch.as_mut() else { return Ok(true) };
+    if f.delay > 0 {
+        f.delay -= 1;
+        return Ok(false);
+    }
+    if f.k == 2 {
+        st.fetch = None;
+        st.mod_top = Some((word(m, COUNTERS), word(m, COUNTERS + 4)));
+        return Ok(true);
+    }
+    let (slot, off, size) = f.files[f.k];
+    let out = HANDLES + 4 * f.k as u32;
+    if !f.requested {
+        let need = (size + 0x7F) & !0x7F;
+        if heap_free(m) < need {
+            st.fetch = None;
+            return Err(format!("not enough memory for the pack ({} KB free, {} KB needed)", heap_free(m) / 1024, need / 1024));
+        }
+        ram_write(m, out, 4, 0);
+        request_thread_call(ALLOC, &[(PATH_BUFS + slot * 0x100) as u64, size as u64]);
+        request_thread_call(SET_GROUP, &[PREV_RESULT]);
+        request_thread_call(MEMCPY, &[out as u64, GROUP as u64, 4]);
+        request_thread_call(SET_GROUP, &[0]);
+        f.requested = true;
+        return Ok(false);
+    }
+    let h = word(m, out);
+    if h == 0 {
+        return Ok(false);
+    }
+    let data = word(m, h) as usize & 0x1FF_FFFF;
+    let mut buf = vec![0u8; size as usize];
+    let read = m.disc.as_mut().map(|d| d.read_into(off, &mut buf));
+    if !matches!(read, Some(Ok(()))) || data + buf.len() > m.ram.len() {
+        st.fetch = None;
+        return Err("could not read the pack from the disc image".into());
+    }
+    m.ram[data..data + buf.len()].copy_from_slice(&buf);
+    request_thread_call(REGISTER_PACK, &[h as u64, slot as u64, 0]);
+    f.k += 1;
+    f.requested = false;
+    // The registration (next frame) shrinks a texture pack to its header (0x10B098 frees the
+    // uploaded data): only then is there room for the next file.
+    f.delay = 3;
+    Ok(false)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -387,7 +496,9 @@ struct State {
     before: Vec<u32>,
     /// The counters right after the mod's packs were registered (they are on top while equal).
     mod_top: Option<(u32, u32)>,
-    mod_loading: bool,
+    fetch: Option<Fetch>,
+    /// The profile whose packs Become loads after removing the old character.
+    become_pack: Option<String>,
     /// No-clip: the position the mod holds the character in control at.
     noclip: Option<[f32; 3]>,
     /// Stage choice 0-4 (the stage select's), then devil_debug::EXTRA_STAGES.
@@ -525,11 +636,31 @@ fn become_step(m: &mut Machine, st: &mut State) {
                 st.become_step = Become::Idle;
                 return;
             };
-            if model_loaded(m, &pname) {
-                if st.mod_loading {
-                    st.mod_loading = false;
-                    st.mod_top = Some((word(m, COUNTERS), word(m, COUNTERS + 4)));
+            if st.fetch.is_some() {
+                // Spawn: the packs load while the player stays.
+                if let Err(e) = drive_fetch(m, st) {
+                    st.last = e;
+                    st.become_step = Become::Idle;
+                } else {
+                    st.become_step = Become::Loading { profile, waited: waited + 1 };
                 }
+                return;
+            }
+            if st.become_pack.is_some() && !st.spawning {
+                // Become: remove the old character first (its pack may be the one replaced).
+                let old = player(m);
+                if old == 0 {
+                    st.last = "no player in this scene".into();
+                    st.become_step = Become::Idle;
+                    return;
+                }
+                restore(m, st);
+                ram_write(m, HERO_RECORD, 4, 0);
+                request_thread_call(SAVE_HERO, &[old as u64]);
+                st.become_step = Become::Saved { old, id, waited: 0 };
+                return;
+            }
+            if model_loaded(m, &pname) {
                 let old = player(m);
                 if old == 0 {
                     st.last = "no player in this scene".into();
@@ -569,8 +700,44 @@ fn become_step(m: &mut Machine, st: &mut State) {
             if alive(m, old) {
                 request_thread_call(TASK_KILL, &[TASK_POOL as u64, old as u64]);
             }
+            if let Some(pname) = st.become_pack.take() {
+                // The old character is removed with this batch; then its pack can go.
+                match start_fetch(m, st, &pname) {
+                    Ok(()) => st.become_step = Become::Fetching { id, waited: 0 },
+                    Err(e) => {
+                        st.last = e;
+                        ram_write(m, HERO_RECORD + 4, 4, JIN as u64);
+                        request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
+                        st.become_step = Become::Idle;
+                    }
+                }
+                return;
+            }
             request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
             st.become_step = Become::Created { old_id, id, waited: 0 };
+        }
+        Become::Fetching { id, waited } => {
+            let done = drive_fetch(m, st);
+            let profs = profiles(m);
+            let pname = profs.iter().find(|p| p.0 == id).map(|p| p.2.clone()).unwrap_or_default();
+            match done {
+                Ok(true) if model_loaded(m, &pname) => {
+                    request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
+                    st.become_step = Become::Created { old_id: JIN, id, waited: 0 };
+                }
+                Ok(_) if waited < 600 => st.become_step = Become::Fetching { id, waited: waited + 1 },
+                res => {
+                    // Back to Jin (his model is in base.pak, always loaded).
+                    st.last = match res {
+                        Err(e) => e,
+                        _ => format!("{pname}: its pack could not be loaded"),
+                    };
+                    st.fetch = None;
+                    ram_write(m, HERO_RECORD + 4, 4, JIN as u64);
+                    request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
+                    st.become_step = Become::Idle;
+                }
+            }
         }
         Become::SpawnInfo { old, id, waited } => {
             if word(m, SPAWN_INFO + 4) == SPAWN_PENDING {
@@ -624,7 +791,9 @@ fn become_step(m: &mut Machine, st: &mut State) {
                 st.become_step = Become::Idle;
             }
             None if waited > 60 => {
-                // Give the old character back from the same record.
+                // Give the old character back from the same record (Jin if its model is gone).
+                let old_loaded = profiles(m).iter().any(|p| p.0 == old_id && model_loaded(m, &p.2));
+                let old_id = if old_loaded { old_id } else { JIN };
                 ram_write(m, HERO_RECORD + 4, 4, old_id as u64);
                 request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
                 st.last = "become: the game could not create that character here; old one restored".into();
@@ -684,7 +853,8 @@ pub fn update(m: &mut Machine, out: &mut String) {
         before: Vec::new(),
         noclip: None,
         mod_top: None,
-        mod_loading: false,
+        fetch: None,
+        become_pack: None,
         stage: 0,
         stage_restore: 0,
         switched: None,
@@ -807,17 +977,27 @@ pub fn update(m: &mut Machine, out: &mut String) {
                     (Some((_, _, pname)), old) if old != 0 && st.become_step == Become::Idle => {
                         let pname = pname.clone();
                         st.spawning = entry == Entry::Spawn;
+                        st.become_pack = None;
                         if model_loaded(m, &pname) {
                             st.become_step = Become::Loading { profile: st.profile, waited: 0 };
                             format!("becoming {pname} ...")
-                        } else {
-                            match load_pack(m, st, &pname) {
+                        } else if pack_of(&model_base(&pname)).is_none() {
+                            format!("{pname}: no data on the disc")
+                        } else if mod_pack_in_use(m, if st.spawning { 0 } else { old }) {
+                            // Its models would go with the mod's pack.
+                            "a spawned character uses the loaded pack (defeat it first)".into()
+                        } else if st.spawning {
+                            match start_fetch(m, st, &pname) {
                                 Ok(()) => {
                                     st.become_step = Become::Loading { profile: st.profile, waited: 0 };
                                     format!("loading {pname} ...")
                                 }
                                 Err(e) => e,
                             }
+                        } else {
+                            st.become_pack = Some(pname.clone());
+                            st.become_step = Become::Loading { profile: st.profile, waited: 0 };
+                            format!("loading {pname} ...")
                         }
                     }
                     (None, _) => "no profiles loaded".into(),
