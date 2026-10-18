@@ -209,6 +209,46 @@ fn char_packs(profile: &str) -> Option<Packs> {
     })
 }
 
+/// Rebuild a room's BDPK pack with what one character needs: its model (`obj_obj_<base>`) and
+/// everything that is not a model (motions `gym_*`, ...); the room's background (`obj_bg_*`) and
+/// the other models (gimmicks, other characters) go. A room pack is ~2.4 MB, mostly those (the
+/// heap had too little room for it next to a room, 18.10.). Layout: header 0x80 (+4 count, +8
+/// size), 0x80 per entry {"BD", type, .., +8 size, +0x10 offset, +0x14 name}, data 16-aligned.
+fn trim_pack(pack: &[u8], model: &str) -> Vec<u8> {
+    let rd = |o: usize| u32::from_le_bytes(pack[o..o + 4].try_into().unwrap());
+    let n = rd(4) as usize;
+    let mut keep = Vec::new();
+    for i in 0..n {
+        let e = 0x80 * (i + 1);
+        if e + 0x80 > pack.len() {
+            break;
+        }
+        let name_end = pack[e + 0x14..e + 0x80].iter().position(|&b| b == 0).unwrap_or(0x6C);
+        let name = std::str::from_utf8(&pack[e + 0x14..e + 0x14 + name_end]).unwrap_or("");
+        let model_entry = pack[e + 2] == 1 && (name.starts_with("obj_bg_") || name.starts_with("obj_obj_"));
+        if !model_entry || name == model {
+            keep.push(e);
+        }
+    }
+    let mut out = pack[..0x80].to_vec();
+    for &e in &keep {
+        out.extend_from_slice(&pack[e..e + 0x80]);
+    }
+    for (k, &e) in keep.iter().enumerate() {
+        let (size, off) = (rd(e + 8) as usize, rd(e + 0x10) as usize);
+        out.resize((out.len() + 15) & !15, 0);
+        let at = out.len() as u32;
+        out.extend_from_slice(&pack[off..(off + size).min(pack.len())]);
+        let rec = 0x80 * (k + 1);
+        out[rec + 0x10..rec + 0x14].copy_from_slice(&at.to_le_bytes());
+    }
+    out.resize((out.len() + 15) & !15, 0);
+    let (count, total) = (keep.len() as u32, out.len() as u32);
+    out[4..8].copy_from_slice(&count.to_le_bytes());
+    out[8..12].copy_from_slice(&total.to_le_bytes());
+    out
+}
+
 /// Keep only the TIM2 pictures with a GIDX in `keep` in the texture bundles (type 2 entries) of
 /// a BDPK pack (the texture index counter allows 256 textures: a second room bundle beside the
 /// current room's ran past it and the character was not drawn, headless 18.10.).
@@ -313,12 +353,14 @@ fn camera_data(m: &Machine, task: u32) -> u32 {
 const CAM_FIELDS: [u32; 3] = [0x10, 0x0C, 0x20];
 
 /// Pull the cameras that follow `man` back for big characters: profile +0x20 is 100 for Jin and
-/// the soldiers, 250-500 for the bosses (their body size); factor 1 + (size - 100) / 300. The
+/// the soldiers, 250-500 for the bosses (their body size); factor 1 + (size - 100) / 150. The
 /// game's values are kept (`bases`, per camera) and taken anew whenever the game changes them.
+/// The game still shortens the camera at walls (+0x38 current length < +0x3C wanted, recomputed
+/// every frame): in small rooms a very big character (True Ogre) stays close.
 fn scale_cameras(m: &mut Machine, man: u32, bases: &mut std::collections::HashMap<u32, ([f32; 3], [f32; 3])>) {
     let id = half(m, man + 0x160) as u16 as u32;
     let size = profiles(m).iter().find(|p| p.0 == id).map(|p| word(m, p.1 + 0x20)).unwrap_or(100);
-    let factor = 1.0 + (size.clamp(100, 1000) as f32 - 100.0) / 300.0;
+    let factor = 1.0 + (size.clamp(100, 1000) as f32 - 100.0) / 150.0;
     let mut t = word(m, TASK_POOL + 8);
     for _ in 0..1024 {
         if t == 0 {
@@ -490,6 +532,10 @@ enum Become {
 struct Fetch {
     /// (slot, byte offset in the image, size, textures to keep), texture packs first.
     files: Vec<(u32, u64, u32, Vec<u32>)>,
+    /// The character's model (the pack keeps only it of the models).
+    model: String,
+    /// The current file, read and trimmed, waiting for its heap block.
+    data: Vec<u8>,
     /// The file being loaded; files.len() = all registered.
     k: usize,
     /// Vblanks to wait before the first allocation (the unloads run first).
@@ -533,7 +579,8 @@ fn start_fetch(m: &mut Machine, st: &mut State, pname: &str) -> Result<(), Strin
             ram_write(m, buf + i as u32, 1, b as u64);
         }
     }
-    st.fetch = Some(Fetch { files, k: 0, delay: 2, requested: false });
+    let model = format!("obj_obj_{}", model_base(pname));
+    st.fetch = Some(Fetch { files, model, data: Vec::new(), k: 0, delay: 2, requested: false });
     let names: Vec<_> = wanted.iter().map(|w| (w.0, w.1)).collect();
     ps2_runtime::diag::log(format!("devil mod: loading {names:?} for {pname}"));
     Ok(())
@@ -555,16 +602,30 @@ fn drive_fetch(m: &mut Machine, st: &mut State) -> Result<bool, String> {
     let keep = keep.clone();
     let out = HANDLES + 4 * (f.k as u32 % 2);
     if !f.requested {
-        let need = (size + 0x7F) & !0x7F;
+        // Read and trim first: only what the character needs gets a heap block.
+        let mut buf = vec![0u8; size as usize];
+        if !matches!(m.disc.as_mut().map(|d| d.read_into(off, &mut buf)), Some(Ok(()))) {
+            st.fetch = None;
+            return Err("could not read the pack from the disc image".into());
+        }
+        let buf = if slot == MOD_SLOT {
+            trim_pack(&buf, &f.model)
+        } else {
+            // Texture packs hold no models: rebuilt only to drop the cut pictures' space.
+            trim_textures(&mut buf, &keep);
+            trim_pack(&buf, "")
+        };
+        let need = (buf.len() as u32 + 0x7F) & !0x7F;
         if heap_free(m) < need {
             st.fetch = None;
             return Err(format!("not enough memory for the pack ({} KB free, {} KB needed)", heap_free(m) / 1024, need / 1024));
         }
         ram_write(m, out, 4, 0);
-        request_thread_call(ALLOC, &[(PATH_BUFS + slot * 0x100) as u64, size as u64]);
+        request_thread_call(ALLOC, &[(PATH_BUFS + slot * 0x100) as u64, buf.len() as u64]);
         request_thread_call(SET_GROUP, &[PREV_RESULT]);
         request_thread_call(MEMCPY, &[out as u64, GROUP as u64, 4]);
         request_thread_call(SET_GROUP, &[0]);
+        f.data = buf;
         f.requested = true;
         return Ok(false);
     }
@@ -573,13 +634,11 @@ fn drive_fetch(m: &mut Machine, st: &mut State) -> Result<bool, String> {
         return Ok(false);
     }
     let data = word(m, h) as usize & 0x1FF_FFFF;
-    let mut buf = vec![0u8; size as usize];
-    let read = m.disc.as_mut().map(|d| d.read_into(off, &mut buf));
-    if !matches!(read, Some(Ok(()))) || data + buf.len() > m.ram.len() {
+    let buf = std::mem::take(&mut f.data);
+    if data + buf.len() > m.ram.len() {
         st.fetch = None;
-        return Err("could not read the pack from the disc image".into());
+        return Err("the heap block is outside RAM".into());
     }
-    trim_textures(&mut buf, &keep);
     m.ram[data..data + buf.len()].copy_from_slice(&buf);
     request_thread_call(REGISTER_PACK, &[h as u64, slot as u64, 0]);
     f.k += 1;

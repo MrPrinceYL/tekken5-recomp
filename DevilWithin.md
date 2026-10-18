@@ -288,6 +288,15 @@ Soldaten, Boss 1 300, Boss 2 A/3/5 400, Boss 2 D 500). Die Mod skaliert Abstand 
 Kameras, die der gespielten Figur folgen, mit 1 + (Größe − 100)/300 (Spielwerte gemerkt und bei
 Änderung neu übernommen). Headless: Boss 1 ganz im Bild.
 
+**Speicher („not enough memory for the pack“, 18.10. behoben):** Ein Raumpaket (~2,4 MB) besteht
+vor allem aus dem Raum: Hintergrund `obj_bg_*` (~870 KB) und Gimmick-Modelle (Türen, Kisten,
+~850 KB). Die Mod baut es beim Laden neu (`trim_pack`): nur das Modell der Figur und alles, was
+kein Modell ist (Bewegungen `gym_*`); Texturpakete werden nach dem Kürzen der Bilder ebenso
+kompakt neu gepackt. Der Heapblock hat genau die gekürzte Größe. Headless: Monster lv1 → Boss 1
+→ Boss 5 nacheinander, ohne Speichermeldung, texturiert. Kamerafaktor jetzt 1 + (Größe − 100)/150;
+in kleinen Räumen kürzt das Spiel den Kameraabstand an den Wänden (+0x38 < +0x3C, jedes Bild neu),
+True Ogre bleibt dort nah (Stelle der Kürzung noch nicht gefunden).
+
 **Figuren anderer Gebiete (Stand vorher, überholt):** Der Listen-Lader 0x1203F0/0x10C3A8
 öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
 host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur
