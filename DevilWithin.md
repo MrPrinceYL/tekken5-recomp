@@ -215,21 +215,20 @@ existiert) → erscheint keine Figur, wird die alte aus demselben Datensatz neu 
 Verfügbarkeit: Modell `obj_obj_<name>` in einem geladenen Paket (Lade-Slots [0x41AF98] + s*0x4C,
 +0x144 = Handle → BDPK-Daten). Overlay markiert andere Profile mit `[not loaded here]`.
 
-**Warum nicht jede Figur überall:** Der Listen-Lader 0x1203F0/0x10C3A8 öffnet
-`host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
-host0:romdata/list/chr_boss1.txt: not found“). In der Verkaufsversion kommen Figurendaten nur
-aus den Raumpaketen des gespielten Gebiets (Jin und Devil Jin immer aus `base.pak`). Für Figuren
-anderer Gebiete müsste deren Raumpaket zusätzlich geladen werden (Raum-Lader 0x12D7A0:
-0x10A1A0(puffer, pfad, slot, 3, callback) → 0x10A208 registriert; braucht freien Speicher und
-Slot) – nicht gebaut.
-
-**Noch nicht gebaut:**
-- No-Clip (Kamera/Figur): Kollision nicht untersucht; Position belegt (+0x90), Teleport geht.
-- Spawn Gegner/Bosse/Objekte/Items: Gegner entstehen über 0x148400 mit Spawn-Daten aus den
-  Ereignisdateien (KI-Flag, Startobjekt); nicht untersucht. Figuren anderer Gebiete bräuchten
-  deren Raumpakete (s. o.).
-- Stage select: im Debug-Titelmenü (`T5_DW_DEBUG=title` → STAGE SELECT) vorhanden.
-- Figuren aus dem normalen Tekken 5 (z. B. Kazuya): andere Engine und Formate (TK5DATA0/1).
+**Figuren anderer Gebiete (Stand 18.10., headless geprüft):** Der Listen-Lader 0x1203F0/0x10C3A8
+öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
+host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur
+selbst: `0x20EA98(pfad)` (synchron, `sim:romdata/` wird über das Verzeichnis auf TK5DATA2
+umgeleitet) → `0x10A208(handle, slot, 0)` registriert es (wie 0x10A110), Texturpaket in Slot 14,
+Paket in Slot 15 (vorher `0x10A808` entladen); Zuordnung Figur → Paket in `pack_of` (aus dem
+Paketinventar). Ergebnis: Boss 1 und Monster werden in Labor A erzeugt und sind steuerbar (Schatten
+sichtbar), **das Modell wird aber nicht gezeichnet**: Gegner haben kein eigenes Textur-/Mesh-Bündel
+(Jin: `nut_chr_jin` in base.pak), ihre Daten stecken im Bündel ihres Raums (`nut_<raum>` im
+`_tex.pak`), und der Texturverwalter nimmt neben dem aktuellen Raum kein zweites Raum-Bündel.
+Versuche: 0x2164A0 nach dem Laden (leert die Liste 0x3B79C0) → Figur mit Jins Modell gezeichnet
+(Rückfall); Modell-Cache je Profil (0x167330: 0x42B720 + i*0x16A0, Knochenmatrizen, 0x166C68)
+zurücksetzen → Erzeugen schlägt fehl. Beides verworfen. Offen: Texturverwaltung (VRAM) für ein
+zweites Raum-Bündel. Overlay: `[other area: playable, model not drawn]`.
 
 **Laufzeit-Erweiterungen dafür:** `kernel::request_guest_call(_args)` (Interrupt-Kontext, nicht
 für Funktionen, die warten: „WaitSema outside a thread“) und `kernel::request_thread_call`

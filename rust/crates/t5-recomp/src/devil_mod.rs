@@ -26,7 +26,7 @@
 //!   motions, AI); 0x148BC0(record, 0) creates the man from the record as the player.
 
 use ps2_runtime::bus::{ram_read, ram_write};
-use ps2_runtime::kernel::{request_guest_call, request_thread_call};
+use ps2_runtime::kernel::{request_guest_call, request_thread_call, PREV_RESULT};
 use ps2_runtime::Machine;
 use std::sync::Mutex;
 
@@ -52,6 +52,45 @@ const TASK_KILL: u32 = 0x0020_B428;
 /// Pack load slots (0x10C3A8): [0x41AF98] + slot * 0x4C; free while +0x141 (loaded, 0x10A060)
 /// and +0x144 (pack) are 0. 16 slots.
 const LOAD_SLOTS: u32 = 0x0041_AF98;
+/// Load a file from TK5DATA2 synchronously (0x20E9B8 with "sim:romdata/", which 0x20E4C0 maps
+/// to the archive's directory); returns a heap handle (*handle = data).
+const LOAD_FILE: u32 = 0x0020_EA98;
+/// Register a loaded BDPK pack in a load slot (0x109F80): (handle, slot, flag).
+const REGISTER_PACK: u32 = 0x0010_A208;
+/// Unload a load slot (what the area loader 0x12D7A0 does before reusing one).
+const UNLOAD_SLOT: u32 = 0x0010_A808;
+/// The slots the mod loads other areas' character packs into (the area loader uses 0..5 and,
+/// like it (0x12D7A0 states 5 / 9), puts a room's texture pack in the slot before its pack).
+const MOD_TEX_SLOT: u32 = 14;
+const MOD_SLOT: u32 = 15;
+/// The path buffer of a load slot (0x10C3A8 builds slot s's path at 0x425B80 + s * 0x100).
+const PATH_BUFS: u32 = 0x0042_5B80;
+
+/// The room pack that holds a character's model, motions and AI (packs checked against the
+/// lists, sheets/dw_files.csv + the pack inventory, DevilWithin.md).
+fn pack_of(base: &str) -> Option<&'static str> {
+    Some(match base {
+        "boss1" => "area/lab_A/lab_A_005.pak",
+        "boss2" => "area/lab_B/lab_B_005.pak",
+        "boss3" => "area/egy_A/egy_A_005.pak",
+        "boss5" => "area/blu_B/blu_B_005.pak",
+        "tk_standard1" | "tk_standard2" | "tk_speed1" | "tk_power2" => "area/lab_A/lab_A_003.pak",
+        "tk_tricky1" | "tk_power1" => "area/lab_B/lab_B_001.pak",
+        "mon_standard1" | "mon_standard2" | "mon_speed1" | "mon_tricky1" | "mon_power1" => "area/blu_A/blu_A_001.pak",
+        "mon_power2" => "area/blu_A/blu_A_003.pak",
+        _ => return None,
+    })
+}
+
+/// The model base of a profile: `chr_X[_lvN][_A..D]` -> `X`.
+fn model_base(profile: &str) -> String {
+    let base = profile.strip_prefix("chr_").unwrap_or(profile);
+    let base = match base.rfind("_lv") {
+        Some(i) if base[i + 3..].chars().all(|c| c.is_ascii_digit()) => &base[..i],
+        _ => base,
+    };
+    base.strip_suffix(|c: char| c.is_ascii_uppercase()).map(|b| b.trim_end_matches('_')).unwrap_or(base).to_string()
+}
 
 /// Whether the model of a profile is in a loaded pack: the slots' BDPK packs (+0x144: handle -> header
 /// with the entry count at +4, entries of 0x80 bytes from +0x80, name at +0x14; 0x10A5A8).
@@ -60,13 +99,7 @@ const LOAD_SLOTS: u32 = 0x0041_AF98;
 /// `host0:romdata/list/<name>.txt` on the developers' PC; character data comes only from the
 /// packs of the area being played (Jin and Devil Jin from common/base.pak).
 fn model_loaded(m: &Machine, profile: &str) -> bool {
-    let base = profile.strip_prefix("chr_").unwrap_or(profile);
-    let base = match base.rfind("_lv") {
-        Some(i) if base[i + 3..].chars().all(|c| c.is_ascii_digit()) => &base[..i],
-        _ => base,
-    };
-    let base = base.strip_suffix(|c: char| c.is_ascii_uppercase()).map(|b| b.trim_end_matches('_')).unwrap_or(base);
-    let want = format!("obj_obj_{base}");
+    let want = format!("obj_obj_{}", model_base(profile));
     let slots = word(m, LOAD_SLOTS);
     (0..16).any(|s| {
         // +0x144 is a handle whose first word points at the pack data (0x109F80).
@@ -204,8 +237,31 @@ fn player(m: &Machine) -> u32 {
 #[derive(Clone, Copy, PartialEq)]
 enum Become {
     Idle,
+    /// Waiting for the character's room pack (loaded in thread context into MOD_SLOT).
+    Loading { profile: usize, waited: u32 },
     Saved { old: u32, id: u32, waited: u32 },
     Created { old_id: u32, id: u32, waited: u32 },
+}
+
+/// Load the room pack (and its texture pack) of a profile whose model is not loaded: per slot
+/// unload, load the file, register it (thread calls, one batch).
+fn load_pack(m: &mut Machine, pname: &str) -> Result<(), String> {
+    let base = model_base(pname);
+    let Some(path) = pack_of(&base) else {
+        return Err(format!("{pname}: no data on the disc"));
+    };
+    let tex = path.replace(".pak", "_tex.pak");
+    for (slot, file) in [(MOD_TEX_SLOT, tex.as_str()), (MOD_SLOT, path)] {
+        let buf = PATH_BUFS + slot * 0x100;
+        for (i, b) in file.bytes().chain(std::iter::once(0)).enumerate() {
+            ram_write(m, buf + i as u32, 1, b as u64);
+        }
+        request_thread_call(UNLOAD_SLOT, &[slot as u64]);
+        request_thread_call(LOAD_FILE, &[buf as u64]);
+        request_thread_call(REGISTER_PACK, &[PREV_RESULT, slot as u64, 0]);
+    }
+    ps2_runtime::diag::log(format!("devil mod: loading {tex} + {path} for {pname} into slots {MOD_TEX_SLOT}/{MOD_SLOT}"));
+    Ok(())
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -346,6 +402,30 @@ fn man_of(m: &Machine, id: u32, old: u32) -> Option<u32> {
 fn become_step(m: &mut Machine, st: &mut State) {
     match st.become_step {
         Become::Idle => {}
+        Become::Loading { profile, waited } => {
+            let profs = profiles(m);
+            let Some((id, _, pname)) = profs.get(profile).cloned() else {
+                st.become_step = Become::Idle;
+                return;
+            };
+            if model_loaded(m, &pname) {
+                let old = player(m);
+                if old == 0 {
+                    st.last = "no player in this scene".into();
+                    st.become_step = Become::Idle;
+                    return;
+                }
+                restore(m, st);
+                ram_write(m, HERO_RECORD, 4, 0);
+                request_thread_call(SAVE_HERO, &[old as u64]);
+                st.become_step = Become::Saved { old, id, waited: 0 };
+            } else if waited > 300 {
+                st.last = format!("{pname}: its pack could not be loaded");
+                st.become_step = Become::Idle;
+            } else {
+                st.become_step = Become::Loading { profile, waited: waited + 1 };
+            }
+        }
         Become::Saved { old, id, waited } => {
             if half(m, HERO_RECORD) as u16 != 0x33AC || half(m, HERO_RECORD + 0x28) as u16 != 0x3832 {
                 st.become_step = if waited > 120 {
@@ -472,15 +552,20 @@ pub fn update(m: &mut Machine, out: &mut String) {
         if new & CIRCLE != 0 {
             st.last = match entry {
                 Entry::Become => match (profs.get(st.profile), player(m)) {
-                    (Some((_, _, pname)), _) if !model_loaded(m, pname) => {
-                        format!("{pname} is not loaded in this area (retail data comes only from the area's packs)")
-                    }
-                    (Some((id, _, pname)), old) if old != 0 && st.become_step == Become::Idle => {
-                        restore(m, st);
-                        ram_write(m, HERO_RECORD, 4, 0);
-                        request_thread_call(SAVE_HERO, &[old as u64]);
-                        st.become_step = Become::Saved { old, id: *id, waited: 0 };
-                        format!("becoming {pname} ...")
+                    (Some((_, _, pname)), old) if old != 0 && st.become_step == Become::Idle => {
+                        let pname = pname.clone();
+                        if model_loaded(m, &pname) {
+                            st.become_step = Become::Loading { profile: st.profile, waited: 0 };
+                            format!("becoming {pname} ...")
+                        } else {
+                            match load_pack(m, &pname) {
+                                Ok(()) => {
+                                    st.become_step = Become::Loading { profile: st.profile, waited: 0 };
+                                    format!("loading {pname} ...")
+                                }
+                                Err(e) => e,
+                            }
+                        }
                     }
                     (None, _) => "no profiles loaded".into(),
                     _ => "no player in this scene".into(),
@@ -560,7 +645,19 @@ pub fn update(m: &mut Machine, out: &mut String) {
     let target = chars.get(st.pick).map(|&t| name(m, t)).unwrap_or_else(|| "-".into());
     let prof = profs
         .get(st.profile)
-        .map(|p| format!("{} ({:#x}){}", p.2, p.0, if model_loaded(m, &p.2) { "" } else { " [not loaded here]" }))
+        .map(|p| {
+            let note = if model_loaded(m, &p.2) {
+                ""
+            } else if pack_of(&model_base(&p.2)).is_some() {
+                // Loaded and playable, but enemies' meshes/textures live in their room's texture
+                // bundle (nut_<room>), which the texture manager does not take besides the
+                // current room's: the model is not drawn (headless test 18.10., shadow only).
+                " [other area: playable, model not drawn]"
+            } else {
+                " [no data on the disc]"
+            };
+            format!("{} ({:#x}){note}", p.2, p.0)
+        })
         .unwrap_or_else(|| "-".into());
     let on = |b: bool| if b { "ON" } else { "OFF" };
     out.push_str("MOD MENU (Devil Within, branch devil/debug)\n");

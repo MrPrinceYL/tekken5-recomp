@@ -591,6 +591,9 @@ pub fn request_guest_call_args(func: u32, args: &[u64]) {
 static THREAD_CALLS: std::sync::Mutex<Vec<(u32, Vec<u64>)>> = std::sync::Mutex::new(Vec::new());
 pub static THREAD_HOOK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
+/// An argument of `request_thread_call` that stands for the previous call's return value (v0).
+pub const PREV_RESULT: u64 = 0xFFFF_FFFF_FFFF_FFF0;
+
 /// Run `func(args..)` in thread context at the next call of `THREAD_HOOK`.
 pub fn request_thread_call(func: u32, args: &[u64]) {
     if let Ok(mut q) = THREAD_CALLS.lock() {
@@ -606,10 +609,13 @@ pub fn run_thread_calls(c: &mut Ctx) {
         return;
     }
     let saved = Saved { regs: Box::new(c.regs), next: c.next, depth: c.depth, bypass: c.bypass, abort: c.abort };
+    let mut prev = 0u64;
     for (f, args) in calls {
         c.next = 0;
         c.bypass = 0;
+        let args: Vec<u64> = args.iter().map(|&a| if a == PREV_RESULT { prev } else { a }).collect();
         let v0 = c.call_guest(f, &args);
+        prev = v0;
         diag::log(format!("thread call {f:#x}({args:x?}) -> {v0:#x}"));
     }
     c.regs.copy_from_slice(&saved.regs[..]);
