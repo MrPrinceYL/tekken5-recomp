@@ -560,6 +560,36 @@ Grafiken (`cap_teg_msg_font_*`), Dialoge gibt es als Text nicht. Japanischer Kla
   makino 1, effect 1, chr 1–2 – die Liste wuchs bis zur Endfassung (81 Einträge).
 - `common/item.txt`: Test-Item `itm_testA` (p00/p01) – Dateien fehlen.
 
+### Story-Texte der Zwischenspiele (18.10., Nutzerfrage)
+Die Textbildschirme (Spielstart, nach jedem Boss, Ende) sind das Zwischenspiel „2D For
+INTERMISSION (s.takahashi)“ (0x15FC60), Szenentabelle 0x2B8560 (je 0x20 Byte: OPENING, STAGE2–5,
+INSTRUC, ENDING, CREDITS; Paket `common/demo` bzw. `common/inst`). Hintergrund ist das Bild
+`nut_hy_makuma` (640×480, Mishima-Wappen), Schrift `nut_menu_font_4`; der Text steht als
+eigene Kodierung in **`cap_teg_msg_font_account`** (`base.pak`, Typ 5, Format „CAP“):
+`tools/dw_cap_text.py <paket> <eintrag>` bzw. Bilder `tools/tim2png.py`.
+- **Format:** „CAP “, +4 Glyphenzahl (0x86), +0x18 Index, +0x1C Textbereich; Glyphen 16 Byte
+  (+0xE Zeichencode); Text in 16-Bit-Codes: Kleinbuchstaben Code + 0xC1, andere Zeichen
+  Code + 0xE1, 3 = Leerzeichen, 2 = Zeilenende, 1 = Umbruch in Hilfetexten, 0 = Pause der
+  Schreibmaschinen-Anzeige. Index 8 Byte {Offset in 16-Bit-Einheiten, 0, Nummer, 100}; jede
+  Zeile hat mehrere Einträge (je Pause einen).
+- **Welche Texte gezeigt werden:** 0x2CEEF8 Seiten je Szene (3, 2, 3, 2, 2, 4), 0x2CEF10 erste
+  Nachricht je Seite (63, 76, 89 | 102, 115 | 128, 141, 154 | 167, 180 | 193, 206 | 219, 232,
+  245, 258), 13 Zeilen je Seite → Nachrichten **63–270**. Darin steht die **ganze Geschichte**
+  (Einleitung „just as heihachi was attacked, someone raided one of the mishima zaibatsu
+  labs…“ bis „…he stretched his black wings wide and flew into the night sky.“); keine Story-Zeile
+  liegt außerhalb → **keine ungenutzte Story, keine frühere Fassung** auf der Disc (nur US-Text,
+  die Datei gibt es einmal; `cap_teg_msg_font_menutext` in base/demo/inst ist dreimal
+  identisch).
+- Nummern 271–324: Hilfetexte der Menüs (Schwierigkeit, Laden, Kamera, Vibration, Stage-Auswahl
+  „[stage 1]…[stage 5]“, „restart game from middle of stage“), Meldungen „you have unlocked devil
+  jin in the main game“, „you got an item for jin“, „first clear bonus 1,000,000 g“; 366–406
+  Belohnungen: je zwei Kostümteile für 20 Tekken-5-Figuren (z. B. Kazuya „devil wings“, King
+  „armor king mask“) und „acquired star blade for the arcade history mode“.
+- **Lücke:** Die Nummern **325–365 fehlen im Index** (41 Plätze – genau so viele wie die
+  Belohnungsmeldungen 366–406: 20 Figuren × 2 + StarBlade). Die Meldungen wurden offenbar einmal
+  neu nummeriert; der alte Block ist nicht mehr in der Datei.
+- `cap_teg_msg_font_arcade` enthält nur einen Platzhalter („a“).
+
 ### Tastenabfragen / Easter Eggs (18.10.)
 Alle Abfragen des Pad-Zustands (0x2A98E0 gehalten, +4 gedrückt, +8 losgelassen; Pad 2 +0x64)
 durchsucht. Im normalen Spiel gibt es **keine** versteckten Tastenkombinationen (keine Abfrage
