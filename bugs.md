@@ -23,6 +23,12 @@
         nicht (auch die Vorgänger sind ohne Shape; Einstieg vermutlich per JR/JALR bzw. als
         Overlay). Nächster Schritt: Shapes im Fenster sammeln (`T5_VUSHAPES=1`, Szene mit
         vielen Gegnern) → `gen_vu.py --collect-shapes rust/vu_dumps/shapes.txt` → `gen_vu.py`.
+      - **Umgesetzt 18./19.10.:** `gen_vu.py` verfolgt Shapes statisch über alle Einstiege
+        (Programmstarts ohne statischen Vorgänger, Rücksprungstellen nach BAL/JALR, zur
+        Laufzeit gesehene Blockanfänge) und über alle VU-Abbilder (`--collect-image-shapes`,
+        Devil lädt VU-Code auch aus Spieldaten): VU1-Blöcke mit Shapes 961 → 4022. Kurzer
+        Nutzerlauf `T5_VUSHAPES=1` (viele Gegner): 290 von 294 Laufzeit-Shapes waren schon
+        statisch vorhergesagt, 4 ergänzt. vu-bench Moonlit 3000/3000 bitgenau. FPS-Test offen.
 - [~] B10 FMVs: Grafikartefakte in allen FMVs (Nutzer 18.10.: weiterhin).
       Abgleich `ipu.rs` mit PCSX2 `IPU_MultiISA.cpp` (18.10.), Abweichungen behoben:
       - Intra-AC: Betrag skaliert, Vorzeichen danach (Rundung zur 0); wir rundeten negative
@@ -33,6 +39,9 @@
       - Keine MPEG-Mismatch-Korrektur (Koeffizient 63) und keine Klemmung der Non-Intra-
         Residuen (PCSX2 hat beides nicht).
       - IDCT = PCSX2 `IDCT_Block` (Integer, mpeg2dec) statt f64; Test `ipu::tests`.
+      - VDEC-Ergebnis wie PCSX2 `ipuVDEC`: Bewegungscode/DMV vorzeichenerweitert über das ganze
+        Wort (wir lieferten 0x000Lffff für negative Vektoren), Länge ohne Vorzeichenbit,
+        MBT ohne Länge (I/P), mit MC_FRAME (P/B), ECD-Bit.
       - CSC = PCSX2 `yuv2rgb_reference` (Integer-Koeffizienten der Hardware), RGB16 mit
         DTE-Dithering und Alpha-Bit = (Alpha == 0x40) wie `ipu_dither_reference`.
       Nutzertest offen.
