@@ -312,6 +312,17 @@ Start und liest den Index im selben Bild (Vblank-Setzen kam zu spät, headless) 
 0x101D58(0,0), 0x1046E8(Modus, Stufe, Stage), Task beenden, Warp setzen. Headless: Titel → Boss 2
 (Kampf läuft), Mod-Menü → True-Ogre-Arena (Kampf läuft).
 
+**Items und Objekte spawnen (18.10.):** Beute entsteht wie bei besiegten Gegnern (0x148F20):
+Gimmick `0x1C6D88(Eltern, Typ, Matrix)`, Eltern = Raum-Task, in dem die Figur steht (man +0xEC,
+z. B. `bg_lab_A1_c1_01_000001`); Gold bekommt den Betrag mit `0x1C6190(item, min, max)`. Typen:
+0x873 Gold, 0x876/0x877 Leben S/M (Tabelle 0x2CECF8), **0x878 Leben L** – steht in der Tabelle,
+wird aber nie gewählt (die Beute nimmt Eintrag 0 oder 1) und in keinem Raum platziert. Mod-Eintrag
+**Item**: Gold (100–500), Leben S/M/L; headless: Items erscheinen und fliegen wie Beute zu Jin
+(Gold 0 → 332). Eintrag **Object**: alle 163 Gimmick-Typen der Tabelle `**0x2D3158` (+8 Anzahl,
+Einträge ab +0xC {+0 Typ, +8 a, +0xA b}, 12 + 4a + 8b Byte; keine Namen – die kommen aus den
+Platzierungen in gim.db) über denselben Erzeuger. Headless: Typen 0x57, 0xD1, 0x1BD erzeugt, stabil,
+in Labor A Raum 1 aber nicht sichtbar (Modelle anderer Räume bzw. unsichtbare Auslöser).
+
 **Figuren anderer Gebiete (Stand vorher, überholt):** Der Listen-Lader 0x1203F0/0x10C3A8
 öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
 host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur

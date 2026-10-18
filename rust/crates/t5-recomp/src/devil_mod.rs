@@ -657,6 +657,8 @@ enum Entry {
     Back,
     NoClip,
     Stage,
+    Item,
+    Object,
     God,
     Devil,
     Heal,
@@ -670,13 +672,15 @@ enum Entry {
     Close,
 }
 
-const ENTRIES: [Entry; 17] = [
+const ENTRIES: [Entry; 19] = [
     Entry::Become,
     Entry::Spawn,
     Entry::Switch,
     Entry::Back,
     Entry::NoClip,
     Entry::Stage,
+    Entry::Item,
+    Entry::Object,
     Entry::God,
     Entry::Devil,
     Entry::Heal,
@@ -717,6 +721,10 @@ struct State {
     cam_bases: std::collections::HashMap<u32, ([f32; 3], [f32; 3])>,
     /// No-clip: the position the mod holds the character in control at.
     noclip: Option<[f32; 3]>,
+    /// Index into ITEMS.
+    item: usize,
+    /// Index into the gimmick types.
+    object: usize,
     /// Stage choice 0-4 (the stage select's), then devil_debug::EXTRA_STAGES.
     stage: usize,
     /// Vblanks until stage 0 names Lab A again after starting an extra stage.
@@ -1047,6 +1055,61 @@ fn spawned(m: &mut Machine, new: u32, before: &[u32]) -> String {
     format!("spawned {}", name(m, new))
 }
 
+/// Items as the game drops them from defeated enemies (0x148F20): gimmick 0x1C6D88(parent, type,
+/// matrix) with the room task the character stands in as parent (man +0xEC); gold gets its
+/// amount from 0x1C6190(item, min, max). Types: 0x873 gold, 0x876 / 0x877 life S / M (table
+/// 0x2CECF8), 0x878 life L (in that table, never dropped: the drop picks entry 0 or 1, and no
+/// room places it).
+const MAKE_GIMMICK: u32 = 0x001C_6D88;
+const GOLD_AMOUNT: u32 = 0x001C_6190;
+const ITEMS: [(u32, &str); 4] = [
+    (0x873, "Gold (100-500)"),
+    (0x876, "Life S"),
+    (0x877, "Life M"),
+    (0x878, "Life L (never dropped or placed in the game)"),
+];
+
+/// The gimmick types (0x1C6EF0): table **0x2D3158, +8 count, entries from +0xC {+0 type,
+/// +8 a, +0xA b, ..} of 12 + 4a + 8b bytes. No names (they come from gim.db placements).
+const GIMMICK_TYPES: u32 = 0x002D_3158;
+
+fn gimmick_types(m: &Machine) -> Vec<u32> {
+    let base = match word(m, GIMMICK_TYPES) {
+        0 => return Vec::new(),
+        h => word(m, h),
+    };
+    let n = word(m, base + 8).min(1024);
+    let mut e = base + 0xC;
+    (0..n)
+        .map(|_| {
+            let id = word(m, e);
+            e += 12 + 4 * half(m, e + 8) as u16 as u32 + 8 * half(m, e + 0xA) as u16 as u32;
+            id
+        })
+        .collect()
+}
+
+/// Spawn gimmick `kind` 300 units in front of player `p`, child of its room task (man +0xEC).
+fn spawn_gimmick(m: &mut Machine, p: u32, kind: u32) -> Result<(), String> {
+    if p == 0 {
+        return Err("no player in this scene".into());
+    }
+    let room = word(m, p + 0xEC);
+    if room == 0 {
+        return Err("the character stands in no room task".into());
+    }
+    let pos = position(m, p).map(f32::from_bits);
+    let one = 1.0f32.to_bits() as u64;
+    for i in 0..16u32 {
+        ram_write(m, SPAWN_MAT + i * 4, 4, if i % 5 == 0 { one } else { 0 });
+    }
+    for (i, v) in [pos[0] + 300.0, pos[1], pos[2]].iter().enumerate() {
+        ram_write(m, SPAWN_MAT + 0x30 + 4 * i as u32, 4, v.to_bits() as u64);
+    }
+    request_thread_call(MAKE_GIMMICK, &[room as u64, kind as u64, SPAWN_MAT as u64]);
+    Ok(())
+}
+
 /// Start a stage (0x10D680: root task, stage); the root task at 0x2AAAF4.
 const START_STAGE: u32 = 0x0010_D680;
 const ROOT_TASK: u32 = 0x002A_AAF4;
@@ -1082,6 +1145,8 @@ pub fn update(m: &mut Machine, out: &mut String) {
         become_hero: None,
         cam_bases: std::collections::HashMap::new(),
         stage: 0,
+        item: 0,
+        object: 0,
         stage_restore: 0,
         switched: None,
         god: false,
@@ -1208,6 +1273,8 @@ pub fn update(m: &mut Machine, out: &mut String) {
             Entry::Switch => step(&mut st.pick, chars.len()),
             Entry::Become | Entry::Spawn => step(&mut st.profile, profs.len()),
             Entry::Stage => step(&mut st.stage, STAGE_CHOICES),
+            Entry::Item => step(&mut st.item, ITEMS.len()),
+            Entry::Object => step(&mut st.object, gimmick_types(m).len()),
             _ => {}
         }
         if new & CIRCLE != 0 {
@@ -1264,6 +1331,25 @@ pub fn update(m: &mut Machine, out: &mut String) {
                     }
                     format!("starting {}", stage_name(m, st.stage))
                 }
+                Entry::Item => {
+                    let (kind, label) = ITEMS[st.item];
+                    match spawn_gimmick(m, p, kind) {
+                        Ok(()) => {
+                            if kind == 0x873 {
+                                request_thread_call(GOLD_AMOUNT, &[PREV_RESULT, 100, 500]);
+                            }
+                            format!("spawned {label}")
+                        }
+                        Err(e) => e,
+                    }
+                }
+                Entry::Object => match gimmick_types(m).get(st.object) {
+                    Some(&kind) => match spawn_gimmick(m, p, kind) {
+                        Ok(()) => format!("spawned gimmick {kind:#x}"),
+                        Err(e) => e,
+                    },
+                    None => "no gimmick types loaded".into(),
+                },
                 Entry::NoClip => match (st.noclip, p) {
                     (Some(_), _) => {
                         st.noclip = None;
@@ -1372,6 +1458,14 @@ pub fn update(m: &mut Machine, out: &mut String) {
             Entry::Become => format!("Become: < {prof} >  ({}/{})", st.profile + 1, profs.len()),
             Entry::Spawn => format!("Spawn: < {prof} >"),
             Entry::Stage => format!("Stage: < {} >", stage_name(m, st.stage)),
+            Entry::Item => format!("Item: < {} >", ITEMS[st.item].1),
+            Entry::Object => {
+                let types = gimmick_types(m);
+                match types.get(st.object) {
+                    Some(k) => format!("Object: < gimmick type {k:#x} >  ({}/{}, may need its room)", st.object + 1, types.len()),
+                    None => "Object: -".into(),
+                }
+            }
             Entry::NoClip => format!("No clip (character, camera follows): {}", on(st.noclip.is_some())),
             Entry::Switch => format!("Take over: < {target} >  ({}/{})", st.pick + 1, chars.len()),
             Entry::Back => "Back to the original character".into(),
