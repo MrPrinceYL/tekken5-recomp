@@ -264,6 +264,30 @@ Spielerfigur (Jin: 0) und behält es (RAM: Team 0). Ob die blauen Kisten in Labo
 zerstörbar sind, ließ sich headless nicht prüfen (Jin bleibt mit dem Steuerkreuz am Glasboden
 stehen) – Nutzertest.
 
+**Graue Become-/Spawn-Figuren – Texturgruppen (18.10.):** Stufen- und Boss-Varianten teilen ein
+Modell, zeichnen aber mit einer Texturgruppe: Modellsatz-Tabelle 0x2CFBB0 (60 × 0x18: Profil-ID,
+Name, …, Datensatz → +0xC → {+8 Gruppe, +0x10 Modell-ID}); 0x1AD648 setzt beim Zeichnen die
+Gruppe (0x2164C0), 0x216900 addiert sie zu Textur-IDs < 0x10000000. Beispiel
+`chr_mon_standard1_lv1`: Modell nennt GIDX 0x8B4–0x8BB, Gruppe −32 → gezeichnet wird mit
+0x894–0x89B, die nur im Texturbündel von `blu_A_005` (und Ägypten-Räumen) liegen; Soldaten lv2–4
++32/+64/+96, Boss 2 B–D +32…+96. Ohne diese Texturen ist die Figur grau. Lösung:
+`tools/dw_char_packs.py <RAM-Abzug> extracted/tk5data2` erzeugt `t5-recomp/src/devil_chars.rs`
+(je Profil: Texturpaket der Variante, Texturpaket des Modellraums – das Modell löst beim
+Registrieren seine eigenen IDs auf –, kleinstes Paket mit dem Modell, und die ID-Listen). 50 von 60
+Profilen haben ihre Texturen auf der Disc; ohne: `mon_*_lv4`, `mon_speed1/tricky1_lv1`,
+`testchr1–3` (Varianten, die kein Raum nutzt). Die Mod lädt Variante (Slot 8), Modellraum (9),
+Paket (10) und **kürzt die TIM2-Bündel beim Laden auf die benötigten Bilder**: Der
+Texturindex-Zähler erlaubt 256 Texturen; Raum (162) + ganzes `blu_A_005`-Bündel (123) liefen
+darüber, die Figur wurde unsichtbar. Gekürzt: 8 + 8 Texturen. Headless: Monster lv1 in Labor A
+texturiert, Boss 1 texturiert. Bereit heißt jetzt: Modell **und** beide Bündel (`nut_<raum>`)
+geladen.
+
+**Kamera für große Figuren (18.10.):** Kameradaten +0x10 Abstand (Labor A 4500), +0x0C/+0x20
+Höhe (1000), Kamera = Ziel + diese (+0x38 = Länge). Profil +0x20 = Körpergröße (100 Jin und
+Soldaten, Boss 1 300, Boss 2 A/3/5 400, Boss 2 D 500). Die Mod skaliert Abstand und Höhe der
+Kameras, die der gespielten Figur folgen, mit 1 + (Größe − 100)/300 (Spielwerte gemerkt und bei
+Änderung neu übernommen). Headless: Boss 1 ganz im Bild.
+
 **Figuren anderer Gebiete (Stand vorher, überholt):** Der Listen-Lader 0x1203F0/0x10C3A8
 öffnet `host0:romdata/list/<name>.txt` – ein Pfad auf dem Entwickler-PC (Log: „IOP open
 host0:romdata/list/chr_boss1.txt: not found“). Stattdessen lädt die Mod das Raumpaket der Figur

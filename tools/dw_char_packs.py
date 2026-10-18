@@ -1,0 +1,132 @@
+"""Which packs a Devil Within character needs to be drawn (mod menu, branch devil/debug).
+
+A profile's model (`obj_obj_<base>`, model id = profile +8) references textures by GIDX (TIM2
+`eXt`/`GIDX` id). Level and boss variants share the model but draw with a texture group: the
+model set table 0x2CFBB0 (60 x 0x18: id, name, .., record -> {.., +0xC -> {+8 group, +0x10
+model id}}) gives each profile a group added to the ids below 0x10000000 (0x216900, set by
+0x1AD648 while drawing). The shifted textures live in the texture bundle (`<room>_tex.pak`) of
+the rooms where that variant appears. For every profile this finds a room whose texture pack
+holds all shifted ids and the smallest pack holding the model, and writes the Rust table
+rust/crates/t5-recomp/src/devil_chars.rs.
+
+    python tools/dw_char_packs.py <devil RAM dump (T5_RAMSNAP, profiles loaded)> <extracted/tk5data2>
+"""
+import glob
+import os
+import re
+import struct
+import sys
+
+
+def entries(path):
+    d = open(path, 'rb').read()
+    n, = struct.unpack_from('<I', d, 4)
+    for i in range(n):
+        e = d[0x80 * (i + 1):0x80 * (i + 2)]
+        if e[:2] != b'BD':
+            continue
+        size, off = struct.unpack_from('<I', e, 8)[0], struct.unpack_from('<I', e, 0x10)[0]
+        yield e[2], struct.unpack_from('<H', e, 4)[0], e[0x14:0x80].split(b'\0')[0].decode(), d[off:off + size]
+
+
+def gidx(b):
+    return {struct.unpack_from('<I', b, m.start() + 8)[0] for m in re.finditer(b'GIDX', b)}
+
+
+def main(ram_path, root):
+    ram = open(ram_path, 'rb').read()
+    w = lambda a: struct.unpack_from('<I', ram, a & 0x1FFFFFF)[0]
+    cs = lambda a: ram[a & 0x1FFFFFF:(a & 0x1FFFFFF) + 64].split(b'\0')[0].decode('latin1')
+    rel = lambda p: os.path.relpath(p, root).replace(os.sep, '/')
+    tex = {}      # room -> (tex pack, gidx set)
+    models = {}   # model id -> (name, data, [packs])
+    for p in sorted(glob.glob(os.path.join(root, 'area', '*', '*.pak')) + [os.path.join(root, 'common', 'base.pak')]):
+        if p.endswith('_tex.pak'):
+            s = set()
+            for t, _, _, data in entries(p):
+                if t == 2:
+                    s |= gidx(data)
+            tex[rel(p)[:-len('_tex.pak')]] = (rel(p), s)
+        else:
+            for t, i, name, data in entries(p):
+                if t == 1 and name.startswith('obj_obj_'):
+                    models.setdefault(i, [name, data, []])[2].append(rel(p))
+    base = os.path.join(root, 'common', 'base.pak')
+    for t, _, _, data in entries(base):
+        if t == 2:
+            tex.setdefault('common/base', ('common/base.pak', set()))[1].update(gidx(data))
+    rows = []
+    for i in range(60):
+        e = 0x2CFBB0 + i * 0x18
+        rec = w(e + 0x10)
+        if not rec:
+            continue
+        q = w(rec + 0xC)
+        group = struct.unpack('<i', struct.pack('<I', w(q + 8)))[0]
+        name, mid = cs(w(e + 4)), w(q + 0x10)
+        if mid not in models:
+            rows.append((name, None, None, None, f'model {mid:#x} not on the disc', [], []))
+            continue
+        mname, data, paks = models[mid]
+        # The model's own references: ids of the texture packs of the rooms holding the model.
+        homes = set().union(*(tex[q[:-4]][1] for q in paks if q[:-4] in tex))
+        if 'common/base.pak' in paks:
+            homes |= tex['common/base'][1]
+        refs = {v for v in (struct.unpack_from('<I', data, o)[0] for o in range(0, len(data) - 3, 4))
+                if v >= 0x100} & homes
+        need = {r + group if r < 0x10000000 else r for r in refs}
+        rooms = [r for r, (_, s) in tex.items() if need <= s]
+        cover = ''
+        if not rooms:
+            # Values of the model that only look like ids make a full match impossible: the
+            # texture pack with the most of them.
+            best = max(tex, key=lambda r: len(need & tex[r][1]))
+            hit = len(need & tex[best][1])
+            if not need or hit * 2 < len(need):
+                rows.append((name, None, None, None, f'{mname}: no texture pack has its ids (group {group})', [], []))
+                continue
+            rooms, cover = [best], f', {hit}/{len(need)} ids'
+        # Textures from the variant's room; model and motions from the smallest pack holding the
+        # model (the heap has room for ~2.6 MB besides a room, headless 18.10.).
+        own = [r for r in rooms if r + '.pak' in paks]
+        room = (own or rooms)[0]
+        # The model resolves its own ids when it is registered: the texture pack of the model's
+        # room must be loaded too (smallest pack whose room has them).
+        fits = [q for q in paks if q[:-4] in tex and refs <= tex[q[:-4]][1]] or paks
+        pak = min(fits, key=lambda q: os.path.getsize(os.path.join(root, q)))
+        home = tex[pak[:-4]][0] if pak[:-4] in tex else tex[room][0]
+        rows.append((name, tex[room][0], home, pak, f'{mname}, group {group}{cover}', sorted(need), sorted(refs)))
+    out = ['//! Generated by tools/dw_char_packs.py: the packs a Devil Within character needs to be',
+           '//! drawn with its textures (profile -> texture pack of its variant, texture pack of the',
+           "//! model's room, pack with model and motions). Profiles in comments have no",
+           '//! textures for their group on the disc (variants no room uses).',
+           '',
+           '//! The id lists: the textures the character draws with (its group applied) and the ones',
+           '//! its model names (resolved when it is registered); the mod loads only these.',
+           '',
+           'pub struct CharPacks {',
+           "    pub profile: &'static str,",
+           "    pub variant_tex: &'static str,",
+           "    pub model_tex: &'static str,",
+           "    pub pack: &'static str,",
+           "    pub draw_ids: &'static [u32],",
+           "    pub model_ids: &'static [u32],",
+           '}',
+           '',
+           'pub const CHAR_PACKS: &[CharPacks] = &[']
+    hx = lambda v: ', '.join(f'{x:#x}' for x in v)
+    for name, t, h, p, note, need, refs in rows:
+        if t:
+            out.append(f'    // {note}')
+            out.append(f'    CharPacks {{ profile: "{name}", variant_tex: "{t}", model_tex: "{h}", pack: "{p}", '
+                       f'draw_ids: &[{hx(need)}], model_ids: &[{hx(refs)}] }},')
+        else:
+            out.append(f'    // {name}: {note}')
+    out.append('];')
+    dst = os.path.join(os.path.dirname(__file__), '..', 'rust', 'crates', 't5-recomp', 'src', 'devil_chars.rs')
+    open(dst, 'w', newline=chr(10)).write(chr(10).join(out) + chr(10))
+    print(f'{sum(1 for r in rows if r[1])} of {len(rows)} profiles -> {os.path.normpath(dst)}')
+
+
+if __name__ == '__main__':
+    main(sys.argv[1], sys.argv[2])

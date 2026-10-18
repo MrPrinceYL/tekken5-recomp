@@ -56,9 +56,10 @@ const LOAD_SLOTS: u32 = 0x0041_AF98;
 const REGISTER_PACK: u32 = 0x0010_A208;
 /// Unload a load slot (what the area loader 0x12D7A0 does before reusing one).
 const UNLOAD_SLOT: u32 = 0x0010_A808;
-/// The slots the mod loads other areas' character packs into: texture pack, then pack (the area
-/// loader 0x12D7A0 states 5 / 9 does the same); free in every scene (the game uses 0-6 and 15;
-/// RAM 18.10.).
+/// The slots the mod loads other areas' character packs into: the variant's texture pack, the
+/// texture pack of the model's room, then the pack (texture packs first, as the area loader
+/// 0x12D7A0 states 5 / 9 does); free in every scene (the game uses 0-6 and 15; RAM 18.10.).
+const MOD_VARIANT_SLOT: u32 = 8;
 const MOD_TEX_SLOT: u32 = 9;
 const MOD_SLOT: u32 = 10;
 /// The texture / model counters (0x10B098 / 0x10B528 hand out indices from them; a slot keeps
@@ -160,7 +161,11 @@ fn model_loaded(m: &Machine, profile: &str) -> bool {
 
 /// Whether load slot `s` holds the model of `profile`.
 fn slot_has_model(m: &Machine, s: u32, profile: &str) -> bool {
-    let want = format!("obj_obj_{}", model_base(profile));
+    slot_has_entry(m, s, &format!("obj_obj_{}", model_base(profile)))
+}
+
+/// Whether load slot `s` holds a pack entry named `want`.
+fn slot_has_entry(m: &Machine, s: u32, want: &str) -> bool {
     // +0x144 is a handle whose first word points at the pack data (0x109F80).
     let h = word(m, word(m, LOAD_SLOTS) + s * 0x4C + 0x144);
     let pak = if h != 0 { word(m, h) } else { 0 };
@@ -174,12 +179,109 @@ fn slot_has_model(m: &Machine, s: u32, profile: &str) -> bool {
     })
 }
 
+/// The packs that draw `profile` with its textures (variant's texture pack, texture pack of the
+/// model's room, pack): the generated table (level / boss variants shift their texture ids by a
+/// group, so they need the texture pack of a room where that variant appears, while the model
+/// resolves its own ids when it is registered; devil_chars.rs), else the model's own room
+/// (variants without textures on the disc; drawn untextured).
+struct Packs {
+    variant_tex: String,
+    model_tex: String,
+    pack: String,
+    /// The textures it draws with / its model names; empty = all of the pack.
+    draw_ids: Vec<u32>,
+    model_ids: Vec<u32>,
+}
+
+fn char_packs(profile: &str) -> Option<Packs> {
+    if let Some(c) = crate::devil_chars::CHAR_PACKS.iter().find(|c| c.profile == profile) {
+        return Some(Packs {
+            variant_tex: c.variant_tex.into(),
+            model_tex: c.model_tex.into(),
+            pack: c.pack.into(),
+            draw_ids: c.draw_ids.to_vec(),
+            model_ids: c.model_ids.to_vec(),
+        });
+    }
+    pack_of(&model_base(profile)).map(|p| {
+        let t = p.replace(".pak", "_tex.pak");
+        Packs { variant_tex: t.clone(), model_tex: t, pack: p.into(), draw_ids: Vec::new(), model_ids: Vec::new() }
+    })
+}
+
+/// Keep only the TIM2 pictures with a GIDX in `keep` in the texture bundles (type 2 entries) of
+/// a BDPK pack (the texture index counter allows 256 textures: a second room bundle beside the
+/// current room's ran past it and the character was not drawn, headless 18.10.).
+fn trim_textures(pack: &mut [u8], keep: &[u32]) {
+    let rd = |b: &[u8], o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+    if keep.is_empty() || pack.len() < 8 {
+        return;
+    }
+    let n = rd(pack, 4) as usize;
+    for i in 0..n {
+        let e = 0x80 * (i + 1);
+        if e + 0x80 > pack.len() || &pack[e..e + 2] != b"BD" || pack[e + 2] != 2 {
+            continue;
+        }
+        let (size, off) = (rd(pack, e + 8) as usize, rd(pack, e + 0x10) as usize);
+        if off + size > pack.len() || size < 16 || &pack[off..off + 4] != b"TIM2" {
+            continue;
+        }
+        let nut = pack[off..off + size].to_vec();
+        let head = if nut[5] == 1 { 0x80 } else { 0x10 };
+        let count = u16::from_le_bytes([nut[6], nut[7]]) as usize;
+        let mut out = nut[..head].to_vec();
+        let (mut at, mut kept) = (head, 0u16);
+        for _ in 0..count {
+            if at + 0x30 > nut.len() {
+                break;
+            }
+            let total = rd(&nut, at) as usize;
+            let hsize = u16::from_le_bytes([nut[at + 0xC], nut[at + 0xD]]) as usize;
+            if total == 0 || at + total > nut.len() {
+                break;
+            }
+            let hdr = &nut[at..at + hsize.min(total)];
+            let id = hdr.windows(4).position(|w| w == b"GIDX").and_then(|g| hdr.get(g + 8..g + 12)).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+            if id.is_none_or(|id| keep.contains(&id)) {
+                out.extend_from_slice(&nut[at..at + total]);
+                kept += 1;
+            }
+            at += total;
+        }
+        out[6..8].copy_from_slice(&kept.to_le_bytes());
+        pack[off..off + out.len()].copy_from_slice(&out);
+        pack[e + 8..e + 12].copy_from_slice(&(out.len() as u32).to_le_bytes());
+    }
+}
+
+/// The main texture bundle of a texture pack: `area/x/<room>_tex.pak` -> `nut_<room>`.
+fn nut_of(tex: &str) -> Option<String> {
+    let file = tex.rsplit('/').next()?;
+    file.strip_suffix("_tex.pak").map(|r| format!("nut_{r}"))
+}
+
+/// Model and textures of `profile` loaded (Jin's come with base.pak).
+fn char_ready(m: &Machine, profile: &str) -> bool {
+    if !model_loaded(m, profile) {
+        return false;
+    }
+    match char_packs(profile) {
+        Some(c) => [c.variant_tex, c.model_tex].iter().filter_map(|x| nut_of(x)).all(|nut| (0..16).any(|s| slot_has_entry(m, s, &nut))),
+        None => true,
+    }
+}
+
 /// Whether a living character other than `except` uses a model of the mod's pack.
 fn mod_pack_in_use(m: &Machine, except: u32) -> bool {
     let profs = profiles(m);
     characters(m).into_iter().filter(|&t| t != except).any(|t| {
         let id = half(m, t + 0x160) as u16 as u32;
-        profs.iter().filter(|p| p.0 == id).any(|p| slot_has_model(m, MOD_SLOT, &p.2))
+        profs.iter().filter(|p| p.0 == id).any(|p| {
+            let nuts: Vec<String> = char_packs(&p.2).map(|c| [c.variant_tex, c.model_tex].iter().filter_map(|x| nut_of(x)).collect()).unwrap_or_default();
+            slot_has_model(m, MOD_SLOT, &p.2)
+                || nuts.iter().any(|n| slot_has_entry(m, MOD_TEX_SLOT, n) || slot_has_entry(m, MOD_VARIANT_SLOT, n))
+        })
     })
 }
 
@@ -204,6 +306,41 @@ fn camera_data(m: &Machine, task: u32) -> u32 {
         return 0;
     }
     word(m, word(m, 0x0042_B6B4)) + word(m, 0x0042_B6A8) * i as u32
+}
+
+/// Camera distance (+0x10) and the two height fields (+0x0C, +0x20; camera = target + these,
+/// RAM 18.10.: 4500 / 1000 / 1000 in Lab A, +0x38 = their length).
+const CAM_FIELDS: [u32; 3] = [0x10, 0x0C, 0x20];
+
+/// Pull the cameras that follow `man` back for big characters: profile +0x20 is 100 for Jin and
+/// the soldiers, 250-500 for the bosses (their body size); factor 1 + (size - 100) / 300. The
+/// game's values are kept (`bases`, per camera) and taken anew whenever the game changes them.
+fn scale_cameras(m: &mut Machine, man: u32, bases: &mut std::collections::HashMap<u32, ([f32; 3], [f32; 3])>) {
+    let id = half(m, man + 0x160) as u16 as u32;
+    let size = profiles(m).iter().find(|p| p.0 == id).map(|p| word(m, p.1 + 0x20)).unwrap_or(100);
+    let factor = 1.0 + (size.clamp(100, 1000) as f32 - 100.0) / 300.0;
+    let mut t = word(m, TASK_POOL + 8);
+    for _ in 0..1024 {
+        if t == 0 {
+            break;
+        }
+        if half(m, t + 0x3C) == CAMERA_TYPE {
+            let c = camera_data(m, t);
+            if c != 0 && word(m, c + 0xF0) == man {
+                let now = CAM_FIELDS.map(|o| f32::from_bits(word(m, c + o)));
+                let (base, written) = bases.entry(c).or_insert((now, now));
+                if now != *written {
+                    *base = now;
+                }
+                let want = base.map(|v| v * factor);
+                for (o, v) in CAM_FIELDS.iter().zip(want) {
+                    ram_write(m, c + o, 4, v.to_bits() as u64);
+                }
+                *written = want;
+            }
+        }
+        t = word(m, t + 0x18);
+    }
 }
 
 /// Point the cameras that followed `from` (or lost their target) at `to`.
@@ -351,9 +488,9 @@ enum Become {
 
 /// Loading a character's room pack (and texture pack) into the mod's slots.
 struct Fetch {
-    /// (slot, byte offset in the image, size), texture pack first.
-    files: [(u32, u64, u32); 2],
-    /// The file being loaded; 2 = both registered.
+    /// (slot, byte offset in the image, size, textures to keep), texture packs first.
+    files: Vec<(u32, u64, u32, Vec<u32>)>,
+    /// The file being loaded; files.len() = all registered.
     k: usize,
     /// Vblanks to wait before the first allocation (the unloads run first).
     delay: u32,
@@ -363,31 +500,42 @@ struct Fetch {
 /// Start loading the packs of `pname`: unload the mod's slots (pack first, the stack order; the
 /// counters only go back when nothing was loaded after them), then one file per step.
 fn start_fetch(m: &mut Machine, st: &mut State, pname: &str) -> Result<(), String> {
-    let Some(path) = pack_of(&model_base(pname)) else {
+    let Some(c) = char_packs(pname) else {
         return Err(format!("{pname}: no data on the disc"));
     };
-    let tex = path.replace(".pak", "_tex.pak");
-    let (Some(ft), Some(fp)) = (disc_file(m, &tex), disc_file(m, path)) else {
-        return Err(format!("{pname}: {path} not found in TK5DATA2"));
-    };
+    let mut wanted = vec![(MOD_TEX_SLOT, c.model_tex.as_str(), c.model_ids.clone()), (MOD_SLOT, c.pack.as_str(), Vec::new())];
+    if c.variant_tex != c.model_tex {
+        wanted.insert(0, (MOD_VARIANT_SLOT, c.variant_tex.as_str(), c.draw_ids.clone()));
+    } else if !c.model_ids.is_empty() {
+        wanted[0].2.extend(c.draw_ids.iter().copied());
+    }
+    let mut files = Vec::new();
+    for (slot, file, keep) in &wanted {
+        let Some((off, size)) = disc_file(m, file) else {
+            return Err(format!("{pname}: {file} not found in TK5DATA2"));
+        };
+        files.push((*slot, off, size, keep.clone()));
+    }
     let on_top = st.mod_top == Some((word(m, COUNTERS), word(m, COUNTERS + 4)));
     if !on_top {
         request_thread_call(MEMCPY, &[COUNTER_SAVE as u64, COUNTERS as u64, 8]);
     }
     request_thread_call(UNLOAD_SLOT, &[MOD_SLOT as u64]);
     request_thread_call(UNLOAD_SLOT, &[MOD_TEX_SLOT as u64]);
+    request_thread_call(UNLOAD_SLOT, &[MOD_VARIANT_SLOT as u64]);
     if !on_top {
         request_thread_call(MEMCPY, &[COUNTERS as u64, COUNTER_SAVE as u64, 8]);
     }
     st.mod_top = None;
-    for (slot, file) in [(MOD_TEX_SLOT, tex.as_str()), (MOD_SLOT, path)] {
+    for &(slot, file, _) in &wanted {
         let buf = PATH_BUFS + slot * 0x100;
         for (i, b) in file.bytes().chain(std::iter::once(0)).enumerate() {
             ram_write(m, buf + i as u32, 1, b as u64);
         }
     }
-    st.fetch = Some(Fetch { files: [(MOD_TEX_SLOT, ft.0, ft.1), (MOD_SLOT, fp.0, fp.1)], k: 0, delay: 2, requested: false });
-    ps2_runtime::diag::log(format!("devil mod: loading {tex} + {path} for {pname} into slots {MOD_TEX_SLOT}/{MOD_SLOT}"));
+    st.fetch = Some(Fetch { files, k: 0, delay: 2, requested: false });
+    let names: Vec<_> = wanted.iter().map(|w| (w.0, w.1)).collect();
+    ps2_runtime::diag::log(format!("devil mod: loading {names:?} for {pname}"));
     Ok(())
 }
 
@@ -398,13 +546,14 @@ fn drive_fetch(m: &mut Machine, st: &mut State) -> Result<bool, String> {
         f.delay -= 1;
         return Ok(false);
     }
-    if f.k == 2 {
+    if f.k == f.files.len() {
         st.fetch = None;
         st.mod_top = Some((word(m, COUNTERS), word(m, COUNTERS + 4)));
         return Ok(true);
     }
-    let (slot, off, size) = f.files[f.k];
-    let out = HANDLES + 4 * f.k as u32;
+    let (slot, off, size, ref keep) = f.files[f.k];
+    let keep = keep.clone();
+    let out = HANDLES + 4 * (f.k as u32 % 2);
     if !f.requested {
         let need = (size + 0x7F) & !0x7F;
         if heap_free(m) < need {
@@ -430,6 +579,7 @@ fn drive_fetch(m: &mut Machine, st: &mut State) -> Result<bool, String> {
         st.fetch = None;
         return Err("could not read the pack from the disc image".into());
     }
+    trim_textures(&mut buf, &keep);
     m.ram[data..data + buf.len()].copy_from_slice(&buf);
     request_thread_call(REGISTER_PACK, &[h as u64, slot as u64, 0]);
     f.k += 1;
@@ -504,6 +654,8 @@ struct State {
     /// The character made by Become (its team is held at `hero_team`: the game sets the
     /// profile's after creating it).
     become_hero: Option<u32>,
+    /// Camera fields as the game set them / as the mod wrote them (scale_cameras).
+    cam_bases: std::collections::HashMap<u32, ([f32; 3], [f32; 3])>,
     /// No-clip: the position the mod holds the character in control at.
     noclip: Option<[f32; 3]>,
     /// Stage choice 0-4 (the stage select's), then devil_debug::EXTRA_STAGES.
@@ -665,7 +817,7 @@ fn become_step(m: &mut Machine, st: &mut State) {
                 st.become_step = Become::Saved { old, id, waited: 0 };
                 return;
             }
-            if model_loaded(m, &pname) {
+            if char_ready(m, &pname) {
                 let old = player(m);
                 if old == 0 {
                     st.last = "no player in this scene".into();
@@ -732,7 +884,7 @@ fn become_step(m: &mut Machine, st: &mut State) {
             let profs = profiles(m);
             let pname = profs.iter().find(|p| p.0 == id).map(|p| p.2.clone()).unwrap_or_default();
             match done {
-                Ok(true) if model_loaded(m, &pname) => {
+                Ok(true) if char_ready(m, &pname) => {
                     request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
                     st.become_step = Become::Created { old_id: JIN, id, waited: 0 };
                 }
@@ -804,7 +956,7 @@ fn become_step(m: &mut Machine, st: &mut State) {
             }
             None if waited > 60 => {
                 // Give the old character back from the same record (Jin if its model is gone).
-                let old_loaded = profiles(m).iter().any(|p| p.0 == old_id && model_loaded(m, &p.2));
+                let old_loaded = profiles(m).iter().any(|p| p.0 == old_id && char_ready(m, &p.2));
                 let old_id = if old_loaded { old_id } else { JIN };
                 ram_write(m, HERO_RECORD + 4, 4, old_id as u64);
                 request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
@@ -869,6 +1021,7 @@ pub fn update(m: &mut Machine, out: &mut String) {
         become_pack: None,
         hero_team: 0,
         become_hero: None,
+        cam_bases: std::collections::HashMap::new(),
         stage: 0,
         stage_restore: 0,
         switched: None,
@@ -904,6 +1057,11 @@ pub fn update(m: &mut Machine, out: &mut String) {
     }
     // Unlimited health / devil gauge for the character in control.
     let p = player(m);
+    if p != 0 {
+        let mut bases = std::mem::take(&mut st.cam_bases);
+        scale_cameras(m, p, &mut bases);
+        st.cam_bases = bases;
+    }
     let cd = if p != 0 { char_data(m, p) } else { 0 };
     if cd != 0 {
         if st.god && f32::from_bits(word(m, cd + 0x301C)) > 0.0 {
@@ -1000,10 +1158,10 @@ pub fn update(m: &mut Machine, out: &mut String) {
                         let pname = pname.clone();
                         st.spawning = entry == Entry::Spawn;
                         st.become_pack = None;
-                        if model_loaded(m, &pname) {
+                        if char_ready(m, &pname) {
                             st.become_step = Become::Loading { profile: st.profile, waited: 0 };
                             format!("becoming {pname} ...")
-                        } else if pack_of(&model_base(&pname)).is_none() {
+                        } else if char_packs(&pname).is_none() {
                             format!("{pname}: no data on the disc")
                         } else if mod_pack_in_use(m, if st.spawning { 0 } else { old }) {
                             // Its models would go with the mod's pack.
@@ -1128,9 +1286,11 @@ pub fn update(m: &mut Machine, out: &mut String) {
     let prof = profs
         .get(st.profile)
         .map(|p| {
-            let note = if model_loaded(m, &p.2) {
+            let note = if char_ready(m, &p.2) {
                 ""
-            } else if pack_of(&model_base(&p.2)).is_some() {
+            } else if !crate::devil_chars::CHAR_PACKS.iter().any(|c| c.profile == p.2) && pack_of(&model_base(&p.2)).is_some() {
+                " [no textures for this variant on the disc]"
+            } else if char_packs(&p.2).is_some() {
                 " [other area: loads its pack]"
             } else {
                 " [no data on the disc]"

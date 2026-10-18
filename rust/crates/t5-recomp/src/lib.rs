@@ -11,6 +11,7 @@ pub fn disc_path() -> String {
 }
 
 /// Create the machine (RAM, devices, the disc) and return what the front end shares with it.
+pub mod devil_chars;
 pub mod devil_debug;
 pub mod devil_mod;
 
