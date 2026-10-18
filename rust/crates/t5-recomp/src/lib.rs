@@ -11,15 +11,10 @@ pub fn disc_path() -> String {
 }
 
 /// Create the machine (RAM, devices, the disc) and return what the front end shares with it.
-pub mod devil_chars;
-pub mod devil_debug;
-pub mod devil_mod;
-
 pub fn boot() -> ps2_runtime::Shared {
     ps2_runtime::diag::init("t5_trace.log");
     // The VU micro code translated from sheets/vu_microcode.csv.
     t5_vu::register();
-    devil_debug::install();
     ps2_runtime::create(&disc_path(), PROGRAMS, IOP_MODULES)
 }
 
@@ -36,12 +31,10 @@ pub fn run() -> ! {
 pub mod script {
     use std::sync::OnceLock;
 
-    /// Default hold time, presses (button, second, own hold time).
-    static SCRIPT: OnceLock<(f64, Vec<(u16, f64, Option<f64>)>)> = OnceLock::new();
+    static SCRIPT: OnceLock<(f64, Vec<(u16, f64)>)> = OnceLock::new();
 
     /// Read the presses from the command line (seconds of device time, `ps2_runtime::secs`, so
-    /// they keep their place under `T5_WARP`); `BUTTON@SECOND+HOLD` holds it HOLD seconds.
-    /// False when there are none.
+    /// they keep their place under `T5_WARP`); false when there are none.
     pub fn init(args: &[String]) -> bool {
         let mut presses = Vec::new();
         for w in args.windows(2).filter(|w| w[0] == "--press") {
@@ -54,22 +47,9 @@ pub mod script {
                     "DOWN" => ps2_runtime::pad::DOWN,
                     "LEFT" => ps2_runtime::pad::LEFT,
                     "RIGHT" => ps2_runtime::pad::RIGHT,
-                    "SELECT" => ps2_runtime::pad::SELECT,
-                    "L3" => ps2_runtime::pad::L3,
-                    "R3" => ps2_runtime::pad::R3,
-                    "SQUARE" => ps2_runtime::pad::SQUARE,
-                    "TRIANGLE" => ps2_runtime::pad::TRIANGLE,
-                    "L1" => ps2_runtime::pad::L1,
-                    "R1" => ps2_runtime::pad::R1,
-                    "L2" => ps2_runtime::pad::L2,
-                    "R2" => ps2_runtime::pad::R2,
                     _ => 0,
                 };
-                let (at, hold) = match t.split_once('+') {
-                    Some((a, h)) => (a.parse().unwrap_or(0.0), h.parse().ok()),
-                    None => (t.parse().unwrap_or(0.0), None),
-                };
-                presses.push((bit, at, hold));
+                presses.push((bit, t.parse().unwrap_or(0.0)));
             }
         }
         // T5_HOLD=<seconds>: how long a press is held (menus repeat when held long).
@@ -83,7 +63,7 @@ pub mod script {
     pub fn held() -> u16 {
         let Some((hold, presses)) = SCRIPT.get() else { return 0 };
         let t = ps2_runtime::secs();
-        presses.iter().filter(|(_, at, h)| t >= *at && t < at + h.unwrap_or(*hold)).fold(0, |a, (b, _, _)| a | b)
+        presses.iter().filter(|(_, at)| t >= *at && t < at + hold).fold(0, |a, (b, _)| a | b)
     }
 }
 

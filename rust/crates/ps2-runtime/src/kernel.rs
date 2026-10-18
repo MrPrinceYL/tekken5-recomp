@@ -567,64 +567,6 @@ fn load_elf(m: &mut Machine, path: &str) -> Option<(u32, u32)> {
 // ---------------------------------------------------------------------------------------------
 // Interrupts
 
-/// Guest functions a game crate asked to run (`request_guest_call`; t5_recomp::devil_debug's
-/// opt-in cheat menu): called like an interrupt handler at the next service point.
-static GUEST_CALLS: std::sync::Mutex<Vec<(u32, Vec<u64>)>> = std::sync::Mutex::new(Vec::new());
-
-/// Run the guest function `func` (no arguments, the interrupted thread's gp) at the next
-/// interrupt service point, in interrupt context like the game's own handlers.
-pub fn request_guest_call(func: u32) {
-    request_guest_call_args(func, &[]);
-}
-
-/// `request_guest_call` with arguments (a0.., in order; calls run in the order requested).
-pub fn request_guest_call_args(func: u32, args: &[u64]) {
-    if let Ok(mut q) = GUEST_CALLS.lock() {
-        q.push((func, args.to_vec()));
-    }
-    ATTENTION.store(true, Relaxed);
-}
-
-/// Guest functions to run in the game's own thread context (they may wait, read files):
-/// `run_thread_calls` runs them when the guest calls the function at `THREAD_HOOK` (a function
-/// the game calls once per frame from its main loop, set by the game crate).
-static THREAD_CALLS: std::sync::Mutex<Vec<(u32, Vec<u64>)>> = std::sync::Mutex::new(Vec::new());
-pub static THREAD_HOOK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-/// An argument of `request_thread_call` that stands for the previous call's return value (v0).
-pub const PREV_RESULT: u64 = 0xFFFF_FFFF_FFFF_FFF0;
-
-/// Run `func(args..)` in thread context at the next call of `THREAD_HOOK`.
-pub fn request_thread_call(func: u32, args: &[u64]) {
-    if let Ok(mut q) = THREAD_CALLS.lock() {
-        q.push((func, args.to_vec()));
-    }
-}
-
-/// From the dispatcher, before the hook function runs: the queued calls, with the caller's
-/// registers saved and restored around them.
-pub fn run_thread_calls(c: &mut Ctx) {
-    let calls: Vec<(u32, Vec<u64>)> = THREAD_CALLS.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
-    if calls.is_empty() {
-        return;
-    }
-    let saved = Saved { regs: Box::new(c.regs), next: c.next, depth: c.depth, bypass: c.bypass, abort: c.abort };
-    let mut prev = 0u64;
-    for (f, args) in calls {
-        c.next = 0;
-        c.bypass = 0;
-        let args: Vec<u64> = args.iter().map(|&a| if a == PREV_RESULT { prev } else { a }).collect();
-        let v0 = c.call_guest(f, &args);
-        prev = v0;
-        diag::log(format!("thread call {f:#x}({args:x?}) -> {v0:#x}"));
-    }
-    c.regs.copy_from_slice(&saved.regs[..]);
-    c.next = saved.next;
-    c.depth = saved.depth;
-    c.bypass = saved.bypass;
-    c.abort = saved.abort;
-}
-
 /// Deliver pending INTC / DMAC interrupts if enabled (called from `service`).
 pub fn take_interrupts(c: &mut Ctx) {
     let m = machine();
@@ -634,8 +576,7 @@ pub fn take_interrupts(c: &mut Ctx) {
     let intc = m.istat & m.imask;
     let dmac = crate::dmac::pending(m);
     let alarms = due_alarms(m);
-    let calls: Vec<(u32, Vec<u64>)> = GUEST_CALLS.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default();
-    if intc == 0 && dmac == 0 && alarms.is_empty() && calls.is_empty() {
+    if intc == 0 && dmac == 0 && alarms.is_empty() {
         return;
     }
     m.kernel.in_irq = true;
@@ -665,9 +606,6 @@ pub fn take_interrupts(c: &mut Ctx) {
     }
     for a in alarms {
         call_handler(c, a.func, a.gp, &[a.id as u64, a.ticks as u64, a.arg as u64]);
-    }
-    for (f, args) in calls {
-        call_handler(c, f, 0, &args);
     }
     c.regs.copy_from_slice(&saved.regs[..]);
     c.next = saved.next;

@@ -21,10 +21,6 @@ pub const CIRCLE: u16 = 1 << 13;
 pub const CROSS: u16 = 1 << 14;
 pub const SQUARE: u16 = 1 << 15;
 
-/// Port 1 reads as "nothing pressed, sticks centred" to the game while set (a front-end menu
-/// that takes the pad, e.g. the Devil Within mod menu); `PadShared` keeps the real state.
-pub static BLOCK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 pub struct PadShared {
     pub buttons: [AtomicU16; 2],
     pub connected: [AtomicBool; 2],

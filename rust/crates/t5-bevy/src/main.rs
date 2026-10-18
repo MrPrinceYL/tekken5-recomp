@@ -43,10 +43,6 @@ struct PendingLink(Option<Arc<FrameShared>>);
 #[derive(Component)]
 struct StatusText;
 
-/// Devil Within's debug menus (T5_DW_DEBUG), whose own text output the retail build removed.
-#[derive(Component)]
-struct DebugMenuText;
-
 fn main() {
     let shared = t5_recomp::boot();
     std::thread::Builder::new()
@@ -89,7 +85,7 @@ fn main() {
         .insert_resource(settings::Settings::load())
         .init_resource::<settings::MenuState>()
         .add_systems(Startup, (setup, input::setup_menu, settings::setup, settings::setup_fps))
-        .add_systems(Update, (show_frame, input::read_input, input::menu, settings::menu, fps_counter, update_status, toggle_overlay, fast_forward, update_debug_menu))
+        .add_systems(Update, (show_frame, input::read_input, input::menu, settings::menu, fps_counter, update_status, toggle_overlay, fast_forward))
         .run();
 }
 
@@ -203,15 +199,6 @@ fn setup(
         Visibility::Hidden,
         StatusText,
     ));
-    commands.spawn((
-        Text::new(""),
-        TextFont { font_size: FontSize::Px(20.0), ..default() },
-        TextColor(Color::WHITE),
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-        Node { position_type: PositionType::Absolute, top: px(40), left: px(40), padding: UiRect::all(px(10)), ..default() },
-        Visibility::Hidden,
-        DebugMenuText,
-    ));
     commands.insert_resource(Screen {
         frames,
         image,
@@ -308,20 +295,6 @@ fn update_status(screen: Option<Res<Screen>>, mut q: Query<(&mut Text, &Visibili
     );
     for (mut t, _) in &mut q {
         t.0 = s.clone();
-    }
-}
-
-/// Show the open Devil Within debug menus (t5_recomp::devil_debug::MENU_TEXT).
-fn update_debug_menu(mut q: Query<(&mut Text, &mut Visibility), With<DebugMenuText>>) {
-    let Ok(text) = t5_recomp::devil_debug::MENU_TEXT.lock().map(|t| t.clone()) else { return };
-    for (mut t, mut v) in &mut q {
-        let want = if text.is_empty() { Visibility::Hidden } else { Visibility::Visible };
-        if *v != want {
-            *v = want;
-        }
-        if t.0 != text {
-            t.0 = text.clone();
-        }
     }
 }
 
