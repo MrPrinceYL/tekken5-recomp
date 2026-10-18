@@ -65,6 +65,16 @@ const MOD_TEX_SLOT: u32 = 14;
 const MOD_SLOT: u32 = 15;
 /// The path buffer of a load slot (0x10C3A8 builds slot s's path at 0x425B80 + s * 0x100).
 const PATH_BUFS: u32 = 0x0042_5B80;
+/// Build a man's creation info (0x148A70: info, +0 value, profile id; +4 flags = 0).
+const MAN_INFO: u32 = 0x0014_8A70;
+/// Create a man from (transform, info) through the ManMgr (0x148968 -> 0x148400). Info flag 2
+/// (+4) = not the hero: no "hero exists" check, the task is killable (what 0x157A50 clones
+/// enemies with, info at man +0x100).
+const MAN_CREATE: u32 = 0x0014_8968;
+/// Scratch for a spawn: the path buffers of the unused load slots 12 / 13.
+const SPAWN_INFO: u32 = PATH_BUFS + 12 * 0x100;
+const SPAWN_MAT: u32 = PATH_BUFS + 13 * 0x100;
+const SPAWN_PENDING: u32 = 0xDEAD_BEEF;
 
 /// The room pack that holds a character's model, motions and AI (packs checked against the
 /// lists, sheets/dw_files.csv + the pack inventory, DevilWithin.md).
@@ -123,7 +133,12 @@ const UP: u32 = 0x10;
 const RIGHT: u32 = 0x20;
 const DOWN: u32 = 0x40;
 const LEFT: u32 = 0x80;
+const L2: u32 = 0x100;
+const R2: u32 = 0x200;
 const L1: u32 = 0x400;
+/// Pad 0's left stick as the game keeps it (0x101FC0: pad record 0x2A98A0, +0 x, +4 y, ints).
+const PAD_LX: u32 = 0x002A_98A0;
+const PAD_LY: u32 = 0x002A_98A4;
 const CIRCLE: u32 = 0x2000;
 
 /// matty debug tree entries that run without arguments (0x356130..; DevilWithin.md).
@@ -240,6 +255,8 @@ enum Become {
     /// Waiting for the character's room pack (loaded in thread context into MOD_SLOT).
     Loading { profile: usize, waited: u32 },
     Saved { old: u32, id: u32, waited: u32 },
+    /// Spawn: waiting for MAN_INFO to fill SPAWN_INFO.
+    SpawnInfo { old: u32, id: u32, waited: u32 },
     Created { old_id: u32, id: u32, waited: u32 },
 }
 
@@ -267,8 +284,11 @@ fn load_pack(m: &mut Machine, pname: &str) -> Result<(), String> {
 #[derive(Clone, Copy, PartialEq)]
 enum Entry {
     Become,
+    Spawn,
     Switch,
     Back,
+    NoClip,
+    Stage,
     God,
     Devil,
     Heal,
@@ -282,10 +302,13 @@ enum Entry {
     Close,
 }
 
-const ENTRIES: [Entry; 14] = [
+const ENTRIES: [Entry; 17] = [
     Entry::Become,
+    Entry::Spawn,
     Entry::Switch,
     Entry::Back,
+    Entry::NoClip,
+    Entry::Stage,
     Entry::God,
     Entry::Devil,
     Entry::Heal,
@@ -308,6 +331,16 @@ struct State {
     /// Index into the profile list for "Become".
     profile: usize,
     become_step: Become,
+    /// The running Become sequence adds the character instead of replacing the player.
+    spawning: bool,
+    /// The characters before a spawn (the new one is the one not among them).
+    before: Vec<u32>,
+    /// No-clip: the position the mod holds the character in control at.
+    noclip: Option<[f32; 3]>,
+    /// Stage choice 0-4 (the stage select's), then devil_debug::EXTRA_STAGES.
+    stage: usize,
+    /// Vblanks until stage 0 names Lab A again after starting an extra stage.
+    stage_restore: u32,
     /// Active switch: (original player, its controller, target, the target's controller,
     /// the target's team before a swap).
     switched: Option<(u32, i16, u32, i16, Option<i16>)>,
@@ -327,9 +360,20 @@ fn position(m: &Machine, man: u32) -> [u32; 3] {
     [word(m, man + 0x90), word(m, man + 0x94), word(m, man + 0x98)]
 }
 
+/// Copies of the position: man +0x90 (translation of its world matrix) is rebuilt every frame
+/// from the character data (RAM search 18.10.: Jin's x at cd +0, +0x20, +0xA0, with man
+/// +0x90); a move needs all of them.
+const POS_COPIES: [u32; 3] = [0x0, 0x20, 0xA0];
+
 fn set_position(m: &mut Machine, man: u32, pos: [u32; 3]) {
+    let cd = char_data(m, man);
     for (i, v) in pos.iter().enumerate() {
         ram_write(m, man + 0x90 + 4 * i as u32, 4, *v as u64);
+        if cd != 0 {
+            for c in POS_COPIES {
+                ram_write(m, cd + c + 4 * i as u32, 4, *v as u64);
+            }
+        }
     }
 }
 
@@ -415,6 +459,13 @@ fn become_step(m: &mut Machine, st: &mut State) {
                     st.become_step = Become::Idle;
                     return;
                 }
+                st.before = characters(m);
+                if st.spawning {
+                    ram_write(m, SPAWN_INFO + 4, 4, SPAWN_PENDING as u64);
+                    request_thread_call(MAN_INFO, &[SPAWN_INFO as u64, 0, id as u64]);
+                    st.become_step = Become::SpawnInfo { old, id, waited: 0 };
+                    return;
+                }
                 restore(m, st);
                 ram_write(m, HERO_RECORD, 4, 0);
                 request_thread_call(SAVE_HERO, &[old as u64]);
@@ -444,6 +495,50 @@ fn become_step(m: &mut Machine, st: &mut State) {
             request_thread_call(CREATE_HERO, &[HERO_RECORD as u64, 0]);
             st.become_step = Become::Created { old_id, id, waited: 0 };
         }
+        Become::SpawnInfo { old, id, waited } => {
+            if word(m, SPAWN_INFO + 4) == SPAWN_PENDING {
+                st.become_step = if waited > 120 {
+                    st.last = "spawn: the game did not build the info".into();
+                    Become::Idle
+                } else {
+                    Become::SpawnInfo { old, id, waited: waited + 1 }
+                };
+                return;
+            }
+            // +0 and the flags like an enemy of the scene (its info at man +0x100), else flag 2.
+            let enemy = st.before.iter().copied().find(|&t| t != old && alive(m, t) && word(m, t + 0x104) & 2 != 0);
+            let (v0, flags) = match enemy {
+                Some(e) => (word(m, e + 0x100), word(m, e + 0x104)),
+                None => (0, 2),
+            };
+            ram_write(m, SPAWN_INFO, 4, v0 as u64);
+            ram_write(m, SPAWN_INFO + 4, 4, flags as u64);
+            // Transform: identity, translation row = 800 units (about one character length x4) along x.
+            let pos = position(m, old).map(f32::from_bits);
+            let one = 1.0f32.to_bits() as u64;
+            for i in 0..16u32 {
+                ram_write(m, SPAWN_MAT + i * 4, 4, if i % 5 == 0 { one } else { 0 });
+            }
+            for (i, v) in [pos[0] + 800.0, pos[1], pos[2]].iter().enumerate() {
+                ram_write(m, SPAWN_MAT + 0x30 + 4 * i as u32, 4, v.to_bits() as u64);
+            }
+            request_thread_call(MAN_CREATE, &[SPAWN_MAT as u64, SPAWN_INFO as u64]);
+            st.become_step = Become::Created { old_id: 0, id, waited: 0 };
+        }
+        Become::Created { old_id, id, waited } if st.spawning => {
+            let before = st.before.clone();
+            match characters(m).into_iter().find(|t| !before.contains(t)) {
+                Some(new) => {
+                    st.last = spawned(m, new, &before);
+                    st.become_step = Become::Idle;
+                }
+                None if waited > 60 => {
+                    st.last = "spawn: the game could not create that character here".into();
+                    st.become_step = Become::Idle;
+                }
+                None => st.become_step = Become::Created { old_id, id, waited: waited + 1 },
+            }
+        }
         Become::Created { old_id, id, waited } => match man_of(m, id, 0) {
             Some(new) => {
                 ps2_runtime::diag::log(format!("devil mod: became profile {id:#x} ({new:#x})"));
@@ -463,6 +558,40 @@ fn become_step(m: &mut Machine, st: &mut State) {
     }
 }
 
+/// A character MAN_CREATE added: without an enemy to copy the info from, put it on the team
+/// opposite the player's.
+fn spawned(m: &mut Machine, new: u32, before: &[u32]) -> String {
+    let has_enemy = before.iter().any(|&t| alive(m, t) && word(m, t + 0x104) & 2 != 0);
+    let old = player(m);
+    let (dn, dp) = (char_data(m, new), if old != 0 { char_data(m, old) } else { 0 });
+    if !has_enemy && dn != 0 && dp != 0 {
+        ram_write(m, dn + 0x300A, 2, (1 - half(m, dp + 0x300A)) as u16 as u64);
+    }
+    ps2_runtime::diag::log(format!(
+        "devil mod: spawned {new:#x} ({}) at {:?}, player at {:?}; profiles {:?}",
+        name(m, new),
+        position(m, new).map(f32::from_bits),
+        position(m, old).map(f32::from_bits),
+        profiles(m).iter().map(|p| p.2.clone()).collect::<Vec<_>>()
+    ));
+    format!("spawned {}", name(m, new))
+}
+
+/// Start a stage (0x10D680: root task, stage); the root task at 0x2AAAF4.
+const START_STAGE: u32 = 0x0010_D680;
+const ROOT_TASK: u32 = 0x002A_AAF4;
+const STAGE_CHOICES: usize = 5 + crate::devil_debug::EXTRA_STAGES.len();
+
+fn stage_name(m: &Machine, i: usize) -> String {
+    use crate::devil_debug::{EXTRA_STAGES, STAGE_COUNT, STAGE_NAMES};
+    if i as u32 >= STAGE_COUNT {
+        return EXTRA_STAGES[i - STAGE_COUNT as usize].1.into();
+    }
+    // Entry 0 may name an extra stage for a moment: label by index.
+    let n = cstr(m, word(m, STAGE_NAMES + 4 * i as u32));
+    if i == 0 && EXTRA_STAGES.iter().any(|e| e.0 == n) { "lab_A".into() } else { n }
+}
+
 /// Every vertical blank while Devil Within runs: input, effects, menu text.
 pub fn update(m: &mut Machine, out: &mut String) {
     let mut g = STATE.lock().unwrap();
@@ -473,6 +602,11 @@ pub fn update(m: &mut Machine, out: &mut String) {
         pick: 0,
         profile: 0,
         become_step: Become::Idle,
+        spawning: false,
+        before: Vec::new(),
+        noclip: None,
+        stage: 0,
+        stage_restore: 0,
         switched: None,
         god: false,
         devil: false,
@@ -509,7 +643,38 @@ pub fn update(m: &mut Machine, out: &mut String) {
             ram_write(m, cd + 0x3024, 4, max as u64);
         }
     }
+    if st.stage_restore > 0 {
+        st.stage_restore -= 1;
+        if st.stage_restore == 0 {
+            crate::devil_debug::set_stage0(m, None);
+        }
+    }
     let held = word(m, PAD_HELD);
+    // No-clip: hold the character in control at the mod's position (no gravity, no walls),
+    // left stick moves it along world x / z (0.25 m per frame at full tilt), R2 / L2 up /
+    // down; not while SELECT is held (menu).
+    if let Some(mut pos) = st.noclip {
+        if p == 0 {
+            st.noclip = None;
+        } else {
+            if held & SELECT == 0 {
+                let axis = |a: u32| {
+                    let v = (word(m, a) as i32 as f32 / 128.0).clamp(-1.0, 1.0);
+                    if v.abs() < 0.2 { 0.0 } else { v }
+                };
+                pos[0] += axis(PAD_LX) * 25.0;
+                pos[2] += axis(PAD_LY) * 25.0;
+                if held & R2 != 0 {
+                    pos[1] += 25.0;
+                }
+                if held & L2 != 0 {
+                    pos[1] -= 25.0;
+                }
+            }
+            set_position(m, p, pos.map(f32::to_bits));
+            st.noclip = Some(pos);
+        }
+    }
     let new = held & !st.prev_held;
     st.prev_held = held;
     if held & SELECT != 0 && new & L1 != 0 {
@@ -546,14 +711,16 @@ pub fn update(m: &mut Machine, out: &mut String) {
         };
         match entry {
             Entry::Switch => step(&mut st.pick, chars.len()),
-            Entry::Become => step(&mut st.profile, profs.len()),
+            Entry::Become | Entry::Spawn => step(&mut st.profile, profs.len()),
+            Entry::Stage => step(&mut st.stage, STAGE_CHOICES),
             _ => {}
         }
         if new & CIRCLE != 0 {
             st.last = match entry {
-                Entry::Become => match (profs.get(st.profile), player(m)) {
+                Entry::Become | Entry::Spawn => match (profs.get(st.profile), player(m)) {
                     (Some((_, _, pname)), old) if old != 0 && st.become_step == Become::Idle => {
                         let pname = pname.clone();
+                        st.spawning = entry == Entry::Spawn;
                         if model_loaded(m, &pname) {
                             st.become_step = Become::Loading { profile: st.profile, waited: 0 };
                             format!("becoming {pname} ...")
@@ -569,6 +736,32 @@ pub fn update(m: &mut Machine, out: &mut String) {
                     }
                     (None, _) => "no profiles loaded".into(),
                     _ => "no player in this scene".into(),
+                },
+                Entry::Stage => {
+                    // What the stage select does on start (0x1046E8 -> 0x10D708): 0x10D680 with
+                    // the game's root task; an extra stage through stage 0's name.
+                    let stage = if st.stage >= 5 {
+                        crate::devil_debug::set_stage0(m, Some(st.stage - 5));
+                        st.stage_restore = 30;
+                        0
+                    } else {
+                        st.stage
+                    };
+                    st.noclip = None;
+                    restore(m, st);
+                    request_thread_call(START_STAGE, &[word(m, ROOT_TASK) as u64, stage as u64]);
+                    format!("starting {}", stage_name(m, st.stage))
+                }
+                Entry::NoClip => match (st.noclip, p) {
+                    (Some(_), _) => {
+                        st.noclip = None;
+                        "no clip off".into()
+                    }
+                    (None, 0) => "no player in this scene".into(),
+                    (None, p) => {
+                        st.noclip = Some(position(m, p).map(f32::from_bits));
+                        "no clip on: left stick move, R2 / L2 up / down".into()
+                    }
                 },
                 Entry::Switch => match chars.get(st.pick) {
                     Some(&t) => switch_to(m, st, t),
@@ -665,6 +858,9 @@ pub fn update(m: &mut Machine, out: &mut String) {
         out.push_str(if i == st.cur { "> " } else { "  " });
         out.push_str(&match e {
             Entry::Become => format!("Become: < {prof} >  ({}/{})", st.profile + 1, profs.len()),
+            Entry::Spawn => format!("Spawn: < {prof} >"),
+            Entry::Stage => format!("Stage: < {} >", stage_name(m, st.stage)),
+            Entry::NoClip => format!("No clip (character, camera follows): {}", on(st.noclip.is_some())),
             Entry::Switch => format!("Take over: < {target} >  ({}/{})", st.pick + 1, chars.len()),
             Entry::Back => "Back to the original character".into(),
             Entry::God => format!("Unlimited health: {}", on(st.god)),

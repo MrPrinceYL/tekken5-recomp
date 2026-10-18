@@ -204,7 +204,10 @@ hoch/runter Eintrag, links/rechts Auswahl, KREIS ausführen.
 |---|---|---|
 | **Become** (Figur per Profil, 60 Profile aus `char_prof.bin`) | **funktioniert** für Figuren, deren Modell im aktuellen Gebiet geladen ist | Devil Jin (0x33A) und Soldat `chr_tk_standard1_lv1` (0x33E) in Labor A spielbar (Bilder), Boss 1 korrekt abgelehnt |
 | Take over (Gegner übernehmen) | gebaut, Eingabeweg belegt | Figurenliste korrekt (Typ 1000) |
-| Teleport: Save/Load position, to spawn | **funktioniert** | Position = Figur-Task +0x90/+0x94/+0x98; Schreiben setzt die Figur zurück, Matrix folgt |
+| **Spawn** (Gegner/Boss per Profil neben den Spieler) | **funktioniert** | Soldat `chr_tk_standard1_lv1` erscheint in Labor A und greift Jin an (Bild); zweiter Jin als KI |
+| **No clip** (Figur schwebt, Kamera folgt; linker Stick x/z, R2/L2 hoch/runter) | **funktioniert** | Jin schwebt über dem Boden (Bild, R2 1,5 s); Stick-Achsen aus 0x101FC0 |
+| **Stage** (Gebiet 0–4 + Makino-Testraum, aus dem laufenden Spiel) | **funktioniert** | Labor A → Makino-Testraum (Bild) |
+| Teleport: Save/Load position, to spawn | **funktioniert** | Position: Figur-Task +0x90 und Figurdaten +0 / +0x20 / +0xA0 (s. u.) |
 | Unlimited health / devil gauge | gebaut | Felder über tsEHpMan-Funktionen belegt |
 | Restore 30%, Set/Clear COLLECT | gebaut (matty-Funktionen) | |
 
@@ -229,6 +232,34 @@ Versuche: 0x2164A0 nach dem Laden (leert die Liste 0x3B79C0) → Figur mit Jins 
 (Rückfall); Modell-Cache je Profil (0x167330: 0x42B720 + i*0x16A0, Knochenmatrizen, 0x166C68)
 zurücksetzen → Erzeugen schlägt fehl. Beides verworfen. Offen: Texturverwaltung (VRAM) für ein
 zweites Raum-Bündel. Overlay: `[other area: playable, model not drawn]`.
+
+**Spawn** (`Become::SpawnInfo`): Der Helden-Erzeuger 0x148BC0 scheitert, solange ein Held
+existiert (0x148400 → 0x147978 prüft den ManMgr-Eintrag, außer Info-Flag 2). Gegner entstehen
+daher wie beim Klon-Spawner 0x157A50: Info-Block (0xC0 Bytes) per `0x148A70(info, 0, profil)`
+→ Flags (+4) = 2 (kein Held, Task tötbar) → Transformationsmatrix (Einheitsmatrix, Zeile 3 =
+Position, 800 Einheiten neben dem Spieler) → `0x148968(matrix, info)`. Puffer: Pfadpuffer der
+unbenutzten Lade-Slots 12/13 (0x425B80 + s*0x100). Die neue Figur bekommt KI und greift an.
+Figuren anderer Gebiete: wie bei Become geladen, aber unsichtbar.
+
+**No clip / Position:** man +0x90 ist nur die Translation der Weltmatrix (+0x60..0x9F), die
+jedes Bild aus den Figurdaten neu gebaut wird (RAM-Suche 18.10.: Jins x steht in Figurdaten +0,
++0x20 und +0xA0). Nur +0x90 zu schreiben wirkt einen Frame (frühere Teleport-Belege waren
+Zufall). Die Mod schreibt alle Kopien (`POS_COPIES`); No clip hält die Figur so jedes Vsync auf
+der eigenen Position (Schwerkraft zieht zwischendurch ~30 Einheiten, wird zurückgesetzt).
+Maßstab: Gebiete liegen bei ~120000, eine Figur ist etwa 200 Einheiten breit.
+
+**Stage select + ungenutzte Stages:** Alle drei Debug-Stage-Selects (STAGE SELECT, SELECT
+DEVIL, EXTRA-DEBUG) laufen über 0x103E88 (Cursor +0x3C: 0–4, 5 = zurück) und starten mit
+`0x10D680(root [0x2AAAF4], stage)`: Namenstabelle 0x2B8558 (`lab_A`, `lab_B`, `egy_A`,
+`blu_A`, `blu_B`) → `0x125F88(name, 1)` = Warplisten-Eintrag `<name> 1` → Root-Task Zustand 6
+lädt das Gebiet. Nur 0x10D680 liest die Tabelle. Die Mod hängt hinter „back“ die ungenutzten
+Stages an (`devil_debug::EXTRA_STAGES`; Runter auf „back“ → nächste): solange eine gewählt
+ist, zeigt Tabelleneintrag 0 auf ihren Namen (Text im Pfadpuffer von Slot 11), danach wieder
+`lab_A`. Ungenutzte Stages mit Dateien: nur **Makinos Testraum** (`makino 1`, ägyptische
+Steinhalle mit rotem Block, Bild) – spielbar mit Jin. `chr 1` (Figuren-Prüfraum: Listen und
+Skripte, keine Raumgeometrie) bleibt bei NOW LOADING hängen → nicht aufgenommen. Alle übrigen
+Testkarten der Warpliste (bgtest, effect, kondoh, matty, mine, szk) haben keine Dateien.
+Mod-Menü-Eintrag **Stage** macht dasselbe aus dem laufenden Spiel.
 
 **Laufzeit-Erweiterungen dafür:** `kernel::request_guest_call(_args)` (Interrupt-Kontext, nicht
 für Funktionen, die warten: „WaitSema outside a thread“) und `kernel::request_thread_call`
@@ -404,6 +435,7 @@ mit englischen Namen und markiert Karten ohne Daten mit `[no data]` (bzw. `[no r
 
 ## 4. Noch nicht untersucht
 - Inhalte der Textdateien (Dialoge, ungenutzte Texte) – hängt am Archiv (Abschnitt 3).
-- Was STAGE SELECT / SELECT DEVIL / EXTRA-DEBUG (0x103E88 mit Modus 1/5/7) genau anbieten.
-- Ob `area/makino` über STAGE SELECT oder MAP VIEWER ladbar ist.
+- ~~Was STAGE SELECT / SELECT DEVIL / EXTRA-DEBUG anbieten~~ → Abschnitt 2b (Stage 0–4 der
+  Namenstabelle 0x2B8558, Stufe 0–3, Modus 1/5/7).
+- ~~Ob `area/makino` ladbar ist~~ → ja, über MAP VIEWER (Eintrag 61) und die Stage-Selects (2b).
 - Easter Eggs (Tastenkombinationen) im normalen Spiel: noch keine Suche nach Pad-Abfragen.

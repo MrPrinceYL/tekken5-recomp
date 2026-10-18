@@ -74,6 +74,91 @@ pub fn install() {
     }
 }
 
+/// The stage names the stage select starts from (0x10D680: stage i -> the warp list entry
+/// `table[i]` 1 via 0x125F88); only 0x10D680 reads the table.
+pub const STAGE_NAMES: u32 = 0x002B_8558;
+pub const STAGE_COUNT: u32 = 5;
+/// Unused stages added behind the five (warp list entries `<area> 1` with files on the disc,
+/// DevilWithin.md): (area, label). While one is chosen, table entry 0 names it (the string lives
+/// in the unused path buffer of load slot 11). The other test maps have no files; `chr 1`
+/// (lists and scripts, no room geometry) stays on NOW LOADING (headless 18.10.).
+pub const EXTRA_STAGES: &[(&str, &str)] = &[("makino", "Makino test room")];
+const EXTRA_STR: u32 = 0x0042_5B80 + 11 * 0x100;
+/// (Lab A's name pointer, chosen extra stage) while stage 0 names an extra stage.
+static EXTRA: std::sync::Mutex<Option<(u32, usize)>> = std::sync::Mutex::new(None);
+
+/// Let stage 0 start extra stage `e`, or Lab A again (None).
+pub fn set_stage0(m: &mut Machine, e: Option<usize>) {
+    let mut cur = EXTRA.lock().unwrap();
+    match (e, *cur) {
+        (Some(e), _) => {
+            for (i, b) in EXTRA_STAGES[e].0.bytes().chain(std::iter::once(0)).enumerate() {
+                ram_write(m, EXTRA_STR + i as u32, 1, b as u64);
+            }
+            let orig = cur.map(|c| c.0).unwrap_or_else(|| word(m, STAGE_NAMES));
+            ram_write(m, STAGE_NAMES, 4, EXTRA_STR as u64);
+            *cur = Some((orig, e));
+        }
+        (None, Some((orig, _))) => {
+            ram_write(m, STAGE_NAMES, 4, orig as u64);
+            *cur = None;
+        }
+        (None, None) => {}
+    }
+}
+
+fn extra_chosen() -> Option<usize> {
+    EXTRA.lock().unwrap().map(|c| c.1)
+}
+
+/// STAGE SELECT (0x103E88, state 1 cursor +0x3C 0-4, 5 = back): DOWN past "back" walks the
+/// extra stages (cursor held at 0 = the stage that now names one), UP walks back.
+fn stage_select(m: &mut Machine, prev: &mut u32) {
+    let held = word(m, 0x002A_98E0);
+    let new = held & !*prev;
+    *prev = held;
+    let mut t = word(m, TASK_POOL + 8);
+    let mut sel = 0;
+    for _ in 0..1024 {
+        if t == 0 {
+            break;
+        }
+        if word(m, t + 0x20) == 0x0010_3E88 {
+            sel = t;
+            break;
+        }
+        t = word(m, t + 0x18);
+    }
+    if sel == 0 {
+        // Started (the name was read) or left: Lab A again.
+        set_stage0(m, None);
+        return;
+    }
+    if word(m, sel + 0x34) != 1 {
+        return;
+    }
+    match extra_chosen() {
+        Some(e) => {
+            if new & 0x10 != 0 && e == 0 {
+                set_stage0(m, None);
+                ram_write(m, sel + 0x3C, 4, 5);
+                return;
+            }
+            if new & 0x10 != 0 {
+                set_stage0(m, Some(e - 1));
+            } else if new & 0x40 != 0 && e + 1 < EXTRA_STAGES.len() {
+                set_stage0(m, Some(e + 1));
+            }
+            ram_write(m, sel + 0x3C, 4, 0);
+        }
+        None if word(m, sel + 0x3C) == 5 && new & 0x40 != 0 => {
+            set_stage0(m, Some(0));
+            ram_write(m, sel + 0x3C, 4, 0);
+        }
+        None => {}
+    }
+}
+
 fn hook(m: &mut Machine) {
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     static DONE: AtomicBool = AtomicBool::new(false);
@@ -86,6 +171,11 @@ fn hook(m: &mut Machine) {
             t.clear();
         }
         return;
+    }
+    {
+        static PREV: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
+        let mut prev = PREV.lock().unwrap();
+        stage_select(m, &mut prev);
     }
     let mut text = overlay(m);
     crate::devil_mod::update(m, &mut text);
@@ -259,17 +349,26 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
                 7 => "EXTRA-DEBUG",
                 _ => "STAGE SELECT",
             };
+            let st = s(0x3C);
+            let name = match st {
+                _ if extra_chosen().is_some() => {
+                    let (a, l) = EXTRA_STAGES[extra_chosen().unwrap()];
+                    format!("{l} ({a} 1)")
+                }
+                0..=4 => format!("{st} {}", cstr(m, word(m, STAGE_NAMES + 4 * st as u32))),
+                _ => "back".to_string(),
+            };
             if s(0x34) == 2 {
                 format!(
-                    "{what} - stage {}\nLevel {} (0-3)\n--\n\
+                    "{what} - stage {name}\nLevel {} (0-3)\n--\n\
                      Up/Down: level   CIRCLE (C): start (controller 1 or 2)   CROSS (X): back",
-                    s(0x3C),
                     s(0x38)
                 )
             } else {
-                let st = s(0x3C);
-                let name = if st == 5 { "back".to_string() } else { st.to_string() };
-                format!("{what}\nStage {name} (0-4, 5 = back)\n--\nUp/Down: stage   CIRCLE (C): next")
+                format!(
+                    "{what}\nStage {name}  (0-4, back, then the unused stages)\n--\n\
+                     Up/Down: stage (Down past back: unused stages)   CIRCLE (C): next"
+                )
             }
         }
         // NEW GAME / NEW GAME(DEVIL) 0x103B70 / 0x103BC0 (NEWGAME START), update 0x103C10.
@@ -282,7 +381,7 @@ fn tool(m: &Machine, t: u32, f: u32) -> Option<String> {
 }
 
 /// The developer warp list `area/mpl.txt` as parsed by 0x125D38: count at 0x41B55C, table at
-/// *0x41B558, 0x50 bytes per entry (+0 area, +0xE number, +0x10 point, +0x30 label in
+/// **0x41B558 (a heap handle), 0x50 bytes per entry (+0 area, +0xE number, +0x10 point, +0x30 label in
 /// Shift-JIS).
 const MPL_TABLE: u32 = 0x0041_B558;
 const MPL_COUNT: u32 = 0x0041_B55C;
@@ -351,7 +450,10 @@ fn mpl_label(m: &Machine, a: u32) -> String {
 /// MAP VIEWER: the warp list around the cursor, labels in English, test maps without data
 /// marked.
 fn map_viewer(m: &Machine, cur: i32) -> String {
-    let table = word(m, MPL_TABLE);
+    let table = match word(m, MPL_TABLE) {
+        0 => 0,
+        h => word(m, h),
+    };
     let count = int(m, MPL_COUNT);
     let mut out = format!("MAP VIEWER (warp list area/mpl.txt, {count} entries)\n");
     if table == 0 || count <= 0 {
