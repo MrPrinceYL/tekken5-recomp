@@ -605,18 +605,39 @@ impl Ipu {
             }
             3 => {
                 b.skip((cmd & 0x3F) as usize)?;
+                // DATA as PCSX2 ipuVDEC: value | code length << 16, the value sign-extended over
+                // the whole word (motion codes, DMV); macroblock types of I / P pictures without
+                // the length, P / B with MC_FRAME (frame_pred_frame_dct = 1, frame pictures).
                 let start = b.pos;
-                let v = match (cmd >> 26) & 3 {
+                let tbl = (cmd >> 26) & 3;
+                let pct = ((self.ctrl >> 24) & 7).clamp(1, 4);
+                let mpeg1 = self.ctrl & (1 << 23) != 0;
+                let v = match tbl {
                     0 => t.mbai.get(&mut b)?,
-                    1 => {
-                        let pct = ((self.ctrl >> 24) & 7).clamp(1, 4) as usize;
-                        t.mbt[pct - 1].get(&mut b)?
-                    }
+                    1 => t.mbt[pct as usize - 1].get(&mut b)?,
                     2 => t.mc.get(&mut b)?,
                     _ => t.dmv.get(&mut b)?,
                 };
-                let len = (b.pos - start) as u32;
-                self.cmd_data = (v as u32 & 0xFFFF) | (len << 16);
+                let len = (b.pos - start) as i32;
+                let data = if v == i32::MIN || (tbl == 0 && v == 0x22 && !mpeg1) {
+                    // Invalid code (or MPEG-1 stuffing in an MPEG-2 stream): an error, nothing used.
+                    b.pos = start;
+                    0
+                } else {
+                    match tbl {
+                        1 => match pct {
+                            1 => v,
+                            2 => v | if v & 8 != 0 { 0x80 } else { 0 },
+                            3 => v | 0x80 | len << 16,
+                            _ => v | len << 16,
+                        },
+                        // The sign bit is not counted.
+                        2 if v != 0 => v | (len - 1) << 16,
+                        _ => v | len << 16,
+                    }
+                };
+                self.cmd_data = data as u32;
+                self.ctrl = (self.ctrl & !(1 << 14)) | ((data == 0) as u32) << 14;
             }
             4 => {
                 b.skip((cmd & 0x3F) as usize)?;
