@@ -53,6 +53,16 @@
       veraltetem Inhalt auf, Bild hinkt dem Ton nach. Geprüft ohne Befund: ldl/ldr (Ghidra-
       Paar → unausgerichtetes LOAD, Runtime bytegenau), MTSAB/QFSRV (SA in Bits, 0x400 →
       REG_SA). Nächster Schritt: Profil im Intro-FMV.
+      - Profil (19.10.): 22 % des EE in Dateizugriffen der Tonaufnahme → entfernt. Danach im
+        FMV EE-Leerlauf 1,6–2,9 s / 5 s, Ausgabe 270–300 Bilder / 5 s, Artefakte unverändert →
+        Hypothese „Bilder werden übersprungen“ widerlegt.
+      - **Ursache gefunden (19.10.):** VLC-Tabellen der IPU automatisch gegen PCSX2 geprüft (alle
+        2^16 Bitmuster): B-15 (Intra-Koeffizienten bei intra_vlc_format = 1) fehlten 10 Codes
+        (Lauf 0 / Level 8–15, (1,5), (2,4)), die libmpeg2/PCSX2 mit B-14 teilen (tab2/tab3).
+        Folge: Block abgebrochen, Bitstrom verrutscht → kaputter Makroblock, über P/B-Bilder
+        weitergetragen. Fix: Codes in die gemeinsame Liste `long`. CBP, DC, B-14, MBAI, MC
+        geprüft: identisch. MMI-Befehle der MC (ppacb, pextlb/ub, pcpyld, Halbwort-Shifts,
+        qfsrv) und SPR-DMA-Chain (dmaRefImage) geprüft: korrekt. Nutzertest offen.
 
 # Bugliste (Nutzerbericht 14.10.2026) + Prioritäten
 
