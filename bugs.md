@@ -288,3 +288,9 @@ Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).
 - [ ] S1 T4-CLUT-Lookup ohne CSA (Referenz `clut[index]`; die Hardware addiert CSA).
 - [ ] S2 MODE SELECT ohne „THEATER“ (Freischaltung aus dem Spielstand? gegen PCSX2 mit
       derselben Memory Card prüfen).
+
+## Stand 20.10.
+- B12 Arcade History: dbcman-HLE (`rust/crates/ps2-runtime/src/iop/dbc.rs`), Tekken 1 bootet bis
+  in den Attract-Modus. Offen: Eingabe in Tekken 1 prüfen, Tekken 2/3 testen; vdgcu_d-Imports
+  sio2d #6 / dbcman #4 unbehandelt.
+- B18 Devil-Within-FPS: Allokationsfix (4ec606f67), Nutzertest steht aus.
