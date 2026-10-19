@@ -1002,6 +1002,20 @@ fn run_pending(m: &mut Machine) {
                         if crate::diag::enabled("T5_CDLOG") {
                             crate::diag::log(format!("ipu waits for input at {} cmd {cmd:08x} has {} qw", m.now(), q.len()));
                         }
+                        // The command has seen everything the transfer holds: on the hardware it
+                        // has pulled all of it in by now and IPU_TO is done (QWC 0). Take it into
+                        // the input buffer and end the transfer, so the program starts the next
+                        // one only then and nothing read ahead is lost when it does (libmpeg
+                        // otherwise times out on QWC != 0 and replaces the transfer).
+                        if let Some(mut c) = ToCursor::of(m) {
+                            while let Some(v) = c.next(m) {
+                                m.ipu.fifo.push_back(v);
+                            }
+                            c.store(m);
+                            if c.done() {
+                                dmac::finish(m, dmac::IPU_TO);
+                            }
+                        }
                         break; // waits for more input
                     }
                     look *= 4;

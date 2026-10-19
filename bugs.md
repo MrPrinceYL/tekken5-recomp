@@ -85,7 +85,7 @@
         geprüft: identisch. MMI-Befehle der MC (ppacb, pextlb/ub, pcpyld, Halbwort-Shifts,
         qfsrv) und SPR-DMA-Chain (dmaRefImage) geprüft: korrekt. Nutzertest offen.
 
-- [ ] B19 FMVs enden zu früh (Nutzer 19.10.: Intro endet vor „Heihachi Mishima is … dead“,
+- [x] B19 FMVs enden zu früh (Nutzer 19.10.: Intro endet vor „Heihachi Mishima is … dead“,
       danach startet das Sparking-Intro nicht). Messung (`T5_CDLOG`: CD-Lesen, IOP-RPCs,
       SIF0-Zustellung, EE-WaitSema, IPU-Warten/Reset):
       - Nicht von den IPU-Fixes: mit/ohne 32-Bit-TOP-Warten und BP-Meldung endet das Intro an
@@ -109,6 +109,13 @@
         (libmpeg-Fehlerpfad erst als Folge). Offen: warum libmpeg die Puffer am Übergang
         verbraucht (Verdacht: IPU_TO-Neustart verwirft vorausgelesene, nicht verbrauchte
         Daten; Mitschrift „D start … qwc/fifo/pending“ in T5_IPUTRACE vorbereitet).
+      - **Behoben 20.10. (Nutzertest: alle FMV-Fehler weg).** Ursache: wartete ein IPU-Befehl
+        auf Daten, hatte unsere IPU den Rest des IPU_TO-Transfers nur vorausgelesen, QWC blieb
+        > 0; libmpeg lädt nur bei QWC == 0 nach, sonst Timeout nach 500 Polls → Callback setzt
+        einen neuen Transfer und überschreibt den alten → vorausgelesene Daten verloren,
+        Desync am Übergang Intro → Sparking-Intro, Puffer verworfen, Abbruch. Fix (wie die
+        Hardware): wartender Befehl übernimmt den ganzen Rest des Transfers in den
+        Eingabepuffer und beendet IPU_TO (`run_pending`).
 
 # Bugliste (Nutzerbericht 14.10.2026) + Prioritäten
 
