@@ -192,13 +192,16 @@ fn process(m: &mut Machine, n: usize) {
         return;
     }
     m.vif[n].busy = true;
+    // The queue is taken out while its commands run, so each command gets its data as a slice
+    // of it (no copy per command); words fed meanwhile are appended afterwards.
+    let queue = std::mem::take(&mut m.vif[n].queue);
     let mut pos = 0usize;
     loop {
         let vif = &m.vif[n];
-        if vif.stopped || pos >= vif.queue.len() {
+        if vif.stopped || pos >= queue.len() {
             break;
         }
-        let code = vif.queue[pos];
+        let code = queue[pos];
         let Some(need) = data_words(vif, code) else {
             diag::once(format!("VIF{n}: unknown code {code:#010x}"));
             pos += 1;
@@ -206,12 +209,12 @@ fn process(m: &mut Machine, n: usize) {
         };
         // MPG and DIRECT data start on a 64-bit / 128-bit boundary of the stream; the program
         // pads with NOPs, so the word position is already aligned.
-        if pos + 1 + need > vif.queue.len() {
+        if pos + 1 + need > queue.len() {
             break;
         }
-        let data: Vec<u32> = vif.queue[pos + 1..pos + 1 + need].to_vec();
+        let data = &queue[pos + 1..pos + 1 + need];
         pos += 1 + need;
-        command(m, n, code, &data);
+        command(m, n, code, data);
         if code & 0x8000_0000 != 0 {
             // Interrupt bit: stop after this command and raise the VIF interrupt.
             let vif = &mut m.vif[n];
@@ -223,9 +226,12 @@ fn process(m: &mut Machine, n: usize) {
             m.raise(INTC_VIF0 + n as u32);
         }
     }
+    let mut queue = queue;
     let vif = &mut m.vif[n];
-    let pos = pos.min(vif.queue.len());
-    vif.queue.drain(..pos);
+    let added = std::mem::take(&mut vif.queue);
+    queue.drain(..pos.min(queue.len()));
+    queue.extend_from_slice(&added);
+    vif.queue = queue;
     vif.busy = false;
 }
 

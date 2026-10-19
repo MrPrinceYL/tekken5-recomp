@@ -273,7 +273,10 @@ fn transfer(m: &mut Machine, n: usize, madr: u32, qwc: u32, interleave: bool) {
         return;
     }
     let spr = madr & 0x8000_0000 != 0;
-    let mut data = Vec::with_capacity(qwc as usize);
+    // A buffer reused across transfers (taken out, so a nested transfer gets its own).
+    thread_local!(static BUF: std::cell::Cell<Vec<u128>> = const { std::cell::Cell::new(Vec::new()) });
+    let mut data = BUF.with(|b| b.take());
+    data.clear();
     if interleave {
         let tqwc = (m.dmac.sqwc >> 16) & 0xFF;
         let sqwc = m.dmac.sqwc & 0xFF;
@@ -293,6 +296,7 @@ fn transfer(m: &mut Machine, n: usize, madr: u32, qwc: u32, interleave: bool) {
         }
     }
     deliver(m, n, &data);
+    BUF.with(|b| b.set(data));
 }
 
 fn deliver(m: &mut Machine, n: usize, data: &[u128]) {
