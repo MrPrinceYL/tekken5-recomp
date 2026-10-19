@@ -403,6 +403,14 @@ class Gen:
             body = [self.op(o, i, own, relative) for i, o in enumerate(ops)]
         except Exception as e:
             raise ValueError(f"{self.variant} {self.cur:#010x} {self.asm}: {e}") from e
+        if self.asm.split()[0].lstrip("_") in ("lq", "sq"):
+            # The R5900 ignores the low four address bits of LQ / SQ; Ghidra's p-code loads /
+            # stores the four words from the unmasked address (libmpeg's motion compensation
+            # loads unaligned reference rows with LQ and aligns them with QFSRV).
+            mnem, _, out, _ = parse_op(ops[0])
+            if mnem != "INT_ADD" or out is None or out[0] != "U":
+                raise ValueError(f"{self.variant} {self.cur:#010x} {self.asm}: unexpected address op {ops[0]}")
+            body[0] += f"u{out[1]:x}&=!0xF;"
         decl = "".join(f"let mut u{u:x}:{'u128' if u in self.uwide else 'u64'}=0;" for u in sorted(uses) if u not in self.usub)
         if relative[0]:
             arms = "".join(f"{i}=>{{{b}i={i + 1};}}" for i, b in enumerate(body))
