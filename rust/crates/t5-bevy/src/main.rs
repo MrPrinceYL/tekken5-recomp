@@ -212,6 +212,18 @@ fn setup(
     });
 }
 
+/// Window runs: `T5_SHOTS=<dir>` saves the picture once per second of device time.
+fn shot(w: u32, h: u32, rgba: &[u8]) {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+    static DIR: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let Some(dir) = DIR.get_or_init(|| std::env::var("T5_SHOTS").ok()) else { return };
+    let sec = ps2_runtime::secs() as u64;
+    if LAST.swap(sec, std::sync::atomic::Ordering::Relaxed) != sec {
+        let _ = std::fs::create_dir_all(dir);
+        let _ = t5_recomp::write_png(&format!("{dir}/shot_{sec:04}.png"), w, h, rgba);
+    }
+}
+
 fn show_frame(
     mut screen: ResMut<Screen>,
     mut images: ResMut<Assets<Image>>,
@@ -236,6 +248,7 @@ fn show_frame(
     if s.buf.rgba.len() != (w * h * 4) as usize {
         return;
     }
+    shot(w, h, &s.buf.rgba);
     if s.size != (w, h) || restyle {
         let old = std::mem::replace(&mut s.image, images.add(new_image(w, h, s.smooth)));
         images.remove(&old);

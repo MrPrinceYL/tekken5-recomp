@@ -18,6 +18,7 @@
 //!   +0x20 cid, +0x24 server, +0x28 buff, +0x2C cbuff}.
 
 pub mod cdvd;
+pub mod dbc;
 pub mod exec;
 pub mod hle;
 pub mod hw;
@@ -55,6 +56,7 @@ pub enum Kind {
     CdDiskReady2,
     Pad,
     PadExt,
+    Dbc,
     Mc,
     Sdr,
     Unknown,
@@ -81,6 +83,7 @@ pub struct Iop {
     pub cd: cdvd::Cd,
     pub misc: misc::Misc,
     pub pad: pad::Pads,
+    pub dbc: dbc::Dbc,
     pub mc: mc::Mc,
     pub scratch: Box<[u8]>,
     pub exec: exec::IopExec,
@@ -104,6 +107,7 @@ impl Iop {
             cd: cdvd::Cd::default(),
             misc: misc::Misc::default(),
             pad: pad::Pads::default(),
+            dbc: dbc::Dbc::default(),
             mc: mc::Mc::default(),
             reboot_at: None,
             ee_heap: Vec::new(),
@@ -155,6 +159,7 @@ fn kind_of(sid: u32) -> Kind {
         0x8000_059C => Kind::CdDiskReady2,
         0x8000_0100 => Kind::Pad,
         0x8000_0101 => Kind::PadExt,
+        s if dbc::SERVERS.contains(&s) => Kind::Dbc,
         0x8000_0400 => Kind::Mc,
         0x8000_0701 => Kind::Sdr,
         _ => Kind::Unknown,
@@ -235,6 +240,7 @@ pub fn command(m: &mut Machine, pkt: &[u8]) {
             }
             // mcman restarts: the next GetInfo reports a new card again.
             m.iop.mc.seen = [false; 2];
+            m.iop.dbc = dbc::Dbc::default();
             m.sif.queue.clear();
             m.sif.ee_pktbuf = 0;
             m.iop.reboot_at = Some(now + crate::EE_HZ / 10);
@@ -345,6 +351,7 @@ fn rpc_call(m: &mut Machine, pkt: &[u8]) {
         }
         Kind::IopHeap | Kind::LoadFile => misc::heap_call(m, kind, fno, &data, recv_size),
         Kind::Pad | Kind::PadExt => pad::call(m, sid, &data, recv_size),
+        Kind::Dbc => dbc::call(m, sid, fno, &data, recv_size),
         Kind::Mc => mc::call(m, fno, &data, recv_size),
         Kind::Sdr => misc::sdr_call(m, fno, &data, recv_size),
         Kind::Unknown => {
@@ -390,6 +397,7 @@ pub fn update(m: &mut Machine, now: u64) {
     }
     misc::update(m, now);
     pad::update(m);
+    dbc::update(m);
     hw::update(m, now);
     exec::run(m);
 }
