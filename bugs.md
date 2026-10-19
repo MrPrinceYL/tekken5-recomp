@@ -12,7 +12,7 @@
         Textur als fast einfarbige Fläche gesampelt. PCSX2 `GSState::Reset` setzt alle
         allgemeinen Register zurück. Fix 18.10.: `Gs::reset_regs` (Einschaltwerte aus
         `Gs::new`, Speicher bleibt). Nutzertest 20.10.: behoben.
-- [~] B18 Devil Within: FPS fallen drastisch, wenn viele Gegner gleichzeitig erscheinen.
+- [x] B18 Devil Within: FPS fallen drastisch, wenn viele Gegner gleichzeitig erscheinen.
       - Profil im Fenster (Nutzer 18.10., `T5_PROFILE=300`, 60 s, viele Gegner): GAME FRAMES
         180–265 / 5 s, MTVU-Worker 3,1–4,1 s / 5 s belegt (~15–16 ms je gerendertem Bild, an
         der 16,7-ms-Grenze → Spiel lässt Bilder aus). VU1 ~300 Mio. Paare / 5 s in ~2,8 s =
