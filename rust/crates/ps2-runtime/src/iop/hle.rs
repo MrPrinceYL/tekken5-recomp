@@ -602,6 +602,9 @@ fn kernel(m: &mut Machine, c: &mut Ctx, lib: &str, idx: u32) -> Option<i32> {
             let data = m.iop.read(send, ssize as usize);
             let p = super::packet(0x8000_000A, 0x40, &[(0x1C, client), (0x20, fno), (0x24, ssize), (0x28, recv), (0x2C, rsize), (0x30, 1), (0x34, server)]);
             let now = m.now();
+            if diag::enabled("T5_CDLOG") {
+                diag::log(format!("iop->ee rpc fn {fno} mode {mode} at {now}"));
+            }
             let writes = if ssize > 0 && buff != 0 { vec![(buff, data)] } else { vec![] };
             sif::send(m, now, writes, p);
             m.iop.exec.rpc_busy.insert(client);
@@ -875,7 +878,14 @@ fn exec_request(m: &mut Machine, c: &mut Ctx, sd: u32) {
     w32(m, sd + 36, r.fno);
     let old_gp = c.gpr(GPR_GP);
     c.set_gpr(GPR_GP, gp);
+    let cdlog = diag::enabled("T5_CDLOG");
+    let input: Vec<u32> = if cdlog { (0..8).map(|i| m.iop.r32(buff + 4 * i)).collect() } else { Vec::new() };
     let res = c.call_guest(func, &[r.fno, buff, r.size]);
+    if cdlog {
+        let mm = crate::machine();
+        let out: Vec<u32> = if res != 0 { (0..8).map(|i| mm.iop.r32(res + 4 * i)).collect() } else { Vec::new() };
+        diag::log(format!("rpc sd {sd:#x} fn {} size {} in {input:x?} out {out:x?} at {}", r.fno, r.size, mm.now()));
+    }
     c.set_gpr(GPR_GP, old_gp);
     let m = crate::machine();
     let mut writes = Vec::new();

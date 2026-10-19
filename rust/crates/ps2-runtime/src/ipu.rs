@@ -961,6 +961,9 @@ pub fn write(m: &mut Machine, a: u32, v: u64) {
                 m.ipu.ctrl &= !(1 << 17); // invalid IDP: 9 bits
             }
             if v & (1 << 30) != 0 {
+                if crate::diag::enabled("T5_CDLOG") {
+                    crate::diag::log(format!("ipu reset at {}", m.now()));
+                }
                 let keep = (m.ipu.iq_intra, m.ipu.iq_non, m.ipu.ctrl & 0x07F3_3F00);
                 m.ipu = Ipu::default();
                 (m.ipu.iq_intra, m.ipu.iq_non, m.ipu.ctrl) = keep;
@@ -992,6 +995,9 @@ fn run_pending(m: &mut Machine) {
                 }
                 Err(NeedData) => {
                     if q.len() < m.ipu.fifo.len() + look || look >= 1 << 17 {
+                        if crate::diag::enabled("T5_CDLOG") {
+                            crate::diag::log(format!("ipu waits for input at {} cmd {cmd:08x} has {} qw", m.now(), q.len()));
+                        }
                         break; // waits for more input
                     }
                     look *= 4;

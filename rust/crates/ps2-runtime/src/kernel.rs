@@ -1239,7 +1239,15 @@ fn wait_sema(m: &mut Machine, s: usize) -> i64 {
         t.wait_id = s as u32;
         t.wake_result = s as i32;
     }
-    block() as i64
+    let log = diag::enabled("T5_CDLOG");
+    if log {
+        diag::log(format!("ee wait t{cur} s{s} at {}", m.now()));
+    }
+    let r = block() as i64;
+    if log {
+        diag::log(format!("ee woke t{cur} s{s} at {}", machine().now()));
+    }
+    r
 }
 
 fn refer_sema(m: &mut Machine, s: usize, info: u32) -> i64 {

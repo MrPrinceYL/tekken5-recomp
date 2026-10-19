@@ -85,6 +85,23 @@
         geprüft: identisch. MMI-Befehle der MC (ppacb, pextlb/ub, pcpyld, Halbwort-Shifts,
         qfsrv) und SPR-DMA-Chain (dmaRefImage) geprüft: korrekt. Nutzertest offen.
 
+- [ ] B19 FMVs enden zu früh (Nutzer 19.10.: Intro endet vor „Heihachi Mishima is … dead“,
+      danach startet das Sparking-Intro nicht). Messung (`T5_CDLOG`: CD-Lesen, IOP-RPCs,
+      SIF0-Zustellung, EE-WaitSema, IPU-Warten/Reset):
+      - Nicht von den IPU-Fixes: mit/ohne 32-Bit-TOP-Warten und BP-Meldung endet das Intro an
+        derselben Stelle (Bildgruppe 189, letzte mit 16/18 Bildern, ~104 s, kein Endcode).
+      - Nicht Dateiende: der Lesethread des Players (0x3182B4) fordert bis 2 ms vor dem Ende
+        volle 18-KB-Puffer an (fd 0x14, NU-File-Manager fn 3); der Player bricht ab, weil der
+        Video-Callback 0x318BCC eine leere Warteschlange findet (→ 0x1044B0) = Unterlauf.
+      - Nicht CD/IOP/SIF: Lesen 3,4 ms, IOP-Antwort sofort, SIF0-Zustellung 0,04 ms.
+      - Ton stabil: 49,21 Blöcke/s (Soll 49,22), IOP-Tontreiber hält konstant 14 Blöcke.
+      - Der Lesethread (EE-Thread 8, Prio 3) wartet pro Puffer im Median 19 ms auf Sema 25
+        (freier Puffer, 0x418C): der gemeinsame Pufferpool ist voll. Da die Video-Warteschlange
+        leer läuft, hängen die Puffer in einer anderen Strom-Warteschlange (Ton / 3. Strom,
+        Handler in 0x317BA8, Rückgabe != 0 = behalten). Nächster Schritt: Warteschlangen-
+        längen je Strom messen (RAM-Snapshot des Player-Objekts) und den festhaltenden Handler
+        bestimmen.
+
 # Bugliste (Nutzerbericht 14.10.2026) + Prioritäten
 
 Status: [ ] offen, [~] in Arbeit, [x] behoben (mit Ursache).

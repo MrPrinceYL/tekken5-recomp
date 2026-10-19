@@ -167,6 +167,10 @@ pub fn update(m: &mut Machine, now: u64) {
         return;
     }
     let d = m.sif.queue.remove(i).unwrap();
+    if crate::diag::enabled("T5_CDLOG") {
+        let cmd = u32::from_le_bytes(d.packet[4..8].try_into().unwrap_or([0; 4]));
+        crate::diag::log(format!("sif0 deliver cmd {cmd:#x} sent {} at {now} queue {}", d.at, m.sif.queue.len()));
+    }
     for (addr, data) in &d.writes {
         for (i, b) in data.iter().enumerate() {
             crate::bus::ram_write(m, addr + i as u32, 1, *b as u64);

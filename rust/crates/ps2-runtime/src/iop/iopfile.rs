@@ -30,8 +30,11 @@ pub fn cdvd(m: &mut Machine, c: &mut Ctx, idx: u32) -> i32 {
                 let _ = d.read_into(lsn as u64 * 2048, &mut data);
             }
             m.iop.write(buf, &data);
-            busy_for(m, data.len() as u64);
+            let end = busy_for(m, data.len() as u64);
             diag::count("iop cd sectors");
+            if diag::enabled("T5_CDLOG") {
+                diag::log(format!("cd read lsn {lsn} n {n} at {} done {end}", m.now()));
+            }
             1
         }
         7 => 1,
@@ -64,6 +67,9 @@ pub fn cdvd(m: &mut Machine, c: &mut Ctx, idx: u32) -> i32 {
             if until <= now {
                 0
             } else if a(0) == 0 {
+                if diag::enabled("T5_CDLOG") {
+                    diag::log(format!("cd sync wait at {now} until {until}"));
+                }
                 block(m, Wait::Delay(until));
                 0
             } else {
