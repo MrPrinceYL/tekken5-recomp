@@ -29,7 +29,22 @@
         Devil lädt VU-Code auch aus Spieldaten): VU1-Blöcke mit Shapes 961 → 4022. Kurzer
         Nutzerlauf `T5_VUSHAPES=1` (viele Gegner): 290 von 294 Laufzeit-Shapes waren schon
         statisch vorhergesagt, 4 ergänzt. vu-bench Moonlit 3000/3000 bitgenau. FPS-Test offen.
-- [~] B10 FMVs: Grafikartefakte in allen FMVs (Nutzer 18.10.: weiterhin).
+- [x] B10 FMVs: Grafikartefakte in allen FMVs. **Behoben 19.10. (gemessen, Nutzertest offen).**
+      Ursache (Messkette, siehe unten): unsere IPU meldete VDEC/BDEC als fertig bzw.
+      dekodierte VLC-Codes, obwohl die vom Spiel per DMA gelieferten Daten mitten im Code
+      endeten (`Vlc::get` sah per `peek16` Nullen) bzw. die 32 Folgebits für `IPU_TOP` fehlten
+      (libmpeg liest seine nächsten Felder aus TOP). Folge: Slice-Desync, Rest der
+      Makroblockzeile kaputt, über P-Bilder weitergetragen. Fix wie PCSX2: Code am Datenende →
+      NeedData; VDEC/BDEC erst fertig, wenn 32 Bits nach dem Code da sind.
+      Messkette: `tests::mpeg_stream_sync` (Prüfstand: Disc-Streams bitgenau, stückweise
+      Zufuhr reproduziert den Fehler), `T5_IPUDUMP` (Eingabestrom des Spiels), `T5_IPUTRACE`
+      (BDEC/VDEC + Zustand), `T5_IPUCSC` (vom Spiel rekonstruierte Bilder = CSC-Eingabe,
+      spaltenweise x*28+y), Vergleich Spiel gegen Prüfstand (`T5_MPEG_ES/RAW/OUT/MBLOG`).
+      Ergebnis Intro (1078 Bilder): vorher Streifen kaputter Blöcke, P-Bilder 124/363 exakt;
+      nachher alle I/P-Bilder bitgenau, 1067 Bilder ohne sichtbar abweichenden Makroblock,
+      Rest = Randfall Vektor über den Bildrand (Prüfstand klemmt, libmpeg liest Speicher).
+      Bekannt, unsichtbar: B-Bilder bidirektional mit xy-Halbpixel-Rückwärtsvektor weichen
+      um -1 ab (libmpeg-Rundung, nicht weitergetragen).
       Abgleich `ipu.rs` mit PCSX2 `IPU_MultiISA.cpp` (18.10.), Abweichungen behoben:
       - Intra-AC: Betrag skaliert, Vorzeichen danach (Rundung zur 0); wir rundeten negative
         Koeffizienten nach unten (±1 je Koeffizient, wird über P/B-Bilder weitergetragen).

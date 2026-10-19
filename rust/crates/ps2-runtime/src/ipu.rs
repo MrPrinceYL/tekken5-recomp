@@ -517,6 +517,9 @@ impl Ipu {
                     }
                 }
             }
+            // Done only once the 32 bits after the macroblock are in (TOP valid), as PCSX2
+            // mpeg2_slice; libmpeg reads its next fields from TOP.
+            b.peek(32)?;
             Ok(())
         })();
         if let Err(e) = res {
@@ -646,6 +649,8 @@ impl Ipu {
                         _ => v | len << 16,
                     }
                 };
+                // As PCSX2 ipuVDEC: busy until the 32 bits after the code are in (TOP valid).
+                b.peek(32)?;
                 self.cmd_data = data as u32;
                 self.ctrl = (self.ctrl & !(1 << 14)) | ((data == 0) as u32) << 14;
             }
