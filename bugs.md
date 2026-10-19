@@ -45,6 +45,12 @@
       Rest = Randfall Vektor über den Bildrand (Prüfstand klemmt, libmpeg liest Speicher).
       Bekannt, unsichtbar: B-Bilder bidirektional mit xy-Halbpixel-Rückwärtsvektor weichen
       um -1 ab (libmpeg-Rundung, nicht weitergetragen).
+      Nutzertest 19.10.: Artefakte weg, Ton synchron (B13 damit erledigt), aber FMVs endeten zu
+      früh. Ursache: wartet ein Befehl auf Eingabe, meldete IPU_BP weiter den vollen FIFO
+      (wir dekodieren einen Befehl am Stück); libmpeg lädt nur bei < 32 verfügbaren Bits nach,
+      sonst pollt es 500-mal und meldet „keine Daten“ → der Player beendet das Video. Fix:
+      wartender Befehl → IPU_BP / CTRL.IFC melden einen leeren FIFO (wie die Hardware).
+      Messung Intro, 100 s: 1079 → 2378 dekodierte Bilder. Nutzertest offen.
       Abgleich `ipu.rs` mit PCSX2 `IPU_MultiISA.cpp` (18.10.), Abweichungen behoben:
       - Intra-AC: Betrag skaliert, Vorzeichen danach (Rundung zur 0); wir rundeten negative
         Koeffizienten nach unten (±1 je Koeffizient, wird über P/B-Bilder weitergetragen).
@@ -60,7 +66,7 @@
       - CSC = PCSX2 `yuv2rgb_reference` (Integer-Koeffizienten der Hardware), RGB16 mit
         DTE-Dithering und Alpha-Bit = (Alpha == 0x40) wie `ipu_dither_reference`.
       Nutzertest offen.
-- [ ] B13 FMVs: Ton manchmal asynchron zum Bild (Nutzer 18.10.: weiterhin).
+- [x] B13 FMVs: Ton manchmal asynchron zum Bild. Behoben mit B10 (Nutzertest 19.10.: synchron).
       Nutzertest 19.10. (nach IPU-Fixes): Artefakte weiter (16×16-Blöcke mit veraltetem /
       versetztem Inhalt in P/B-Bildern, Screenshot), Ton weiter asynchron, Overlay im FMV
       50 FPS. Hypothese für B10 + B13 zusammen: Dekodieren langsamer als Echtzeit → libmpeg

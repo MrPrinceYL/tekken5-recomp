@@ -914,11 +914,19 @@ pub fn read(m: &mut Machine, a: u32) -> u64 {
     match a & 0xF0 {
         0x00 => ipu.cmd_data as u64 | ((ipu.pending.is_some() as u64) << 63),
         0x10 => {
-            let ifc = ipu.fifo.len().saturating_sub(2).min(8) as u32;
+            // IFC as in IPU_BP (empty while a command waits for input).
+            let ifc = if ipu.pending.is_some() { 0 } else { ipu.fifo.len().saturating_sub(2).min(8) as u32 };
             let ofc = ipu.out.len().min(8) as u32;
             (ipu.ctrl & !0xFF & !(1 << 31)) as u64 | ifc as u64 | (ofc << 4) as u64 | ((ipu.pending.is_some() as u64) << 31)
         }
         0x20 => {
+            // A command waiting for input has used everything there is: the hardware decodes
+            // as data arrives, so its FIFO is empty then (libmpeg feeds more only when fewer
+            // than 32 bits are left, else it times out and ends the movie). Ours decodes a
+            // command at once, keeping the input until it completes.
+            if ipu.pending.is_some() {
+                return 0;
+            }
             let fp = ipu.fifo.len().min(2) as u32;
             let ifc = ipu.fifo.len().saturating_sub(2).min(8) as u32;
             (ipu.bp | ifc << 8 | fp << 16) as u64
