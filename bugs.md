@@ -1,6 +1,6 @@
 # Nutzerbericht 18.10.2026 (alte Liste laut Nutzer erledigt) – Reihenfolge = Priorität
 
-- [~] B17 Ladebildschirm beim Start von Devil Within / Arcade History: statt des leuchtenden
+- [x] B17 Ladebildschirm beim Start von Devil Within / Arcade History: statt des leuchtenden
       „NOW LOADING“ (rechts unten, orange Schrift mit rotem Glühen) nur ein dunkelrotes,
       unscharfes Rechteck an derselben Stelle (Vergleichsbild PCSX2).
       - Gezeichnet vom Lader (TK5DATA4, `loader`): `FUN_01e00f50` → sceGsResetGraph, Upload
@@ -11,7 +11,7 @@
         Register blieben auf den Werten von Tekken 5 (TEX1 mit Mipmap/LOD bzw. CLAMP-Region) →
         Textur als fast einfarbige Fläche gesampelt. PCSX2 `GSState::Reset` setzt alle
         allgemeinen Register zurück. Fix 18.10.: `Gs::reset_regs` (Einschaltwerte aus
-        `Gs::new`, Speicher bleibt). Nutzertest offen.
+        `Gs::new`, Speicher bleibt). Nutzertest 20.10.: behoben.
 - [~] B18 Devil Within: FPS fallen drastisch, wenn viele Gegner gleichzeitig erscheinen.
       - Profil im Fenster (Nutzer 18.10., `T5_PROFILE=300`, 60 s, viele Gegner): GAME FRAMES
         180–265 / 5 s, MTVU-Worker 3,1–4,1 s / 5 s belegt (~15–16 ms je gerendertem Bild, an
