@@ -551,6 +551,14 @@ pub fn service(c: &mut Ctx) {
         m.field ^= 1;
         VBLANKS.fetch_add(1, Relaxed);
         diag::tl("EE vblank");
+        // T5_CDLOG: queue fill of the movie player (Namco stream player, thread entry 0x319CD8,
+        // argument = player object): free list +0x40D4, stream queues +0x40F8 + i*0x24 (count +0x1C).
+        if diag::enabled("T5_CDLOG") {
+            if let Some(obj) = m.kernel.threads.iter().flatten().find(|t| t.entry == 0x0031_9CD8).map(|t| t.arg) {
+                let n = |q: u32| bus::ram_read(m, q + 0x1C, 4);
+                diag::log(format!("player queues at {now}: free {} s0 {} s1 {} s2 {} s3 {}", n(obj + 0x40D4), n(obj + 0x40F8), n(obj + 0x411C), n(obj + 0x4140), n(obj + 0x4164)));
+            }
+        }
         // T5_COVERFIELD=1: the EE functions entered in each field (coverfield.txt).
         if diag::enabled("T5_COVERFIELD") {
             ee_core::COVER_ON.store(true, Relaxed);

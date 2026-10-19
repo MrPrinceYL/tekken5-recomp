@@ -98,9 +98,17 @@
       - Der Lesethread (EE-Thread 8, Prio 3) wartet pro Puffer im Median 19 ms auf Sema 25
         (freier Puffer, 0x418C): der gemeinsame Pufferpool ist voll. Da die Video-Warteschlange
         leer läuft, hängen die Puffer in einer anderen Strom-Warteschlange (Ton / 3. Strom,
-        Handler in 0x317BA8, Rückgabe != 0 = behalten). Nächster Schritt: Warteschlangen-
-        längen je Strom messen (RAM-Snapshot des Player-Objekts) und den festhaltenden Handler
-        bestimmen.
+        Handler in 0x317BA8, Rückgabe != 0 = behalten).
+      - Korrigiert 20.10. (T5_WATCHFN, Pufferstände je Halbbild): Player-Objekt 0xE97BC0,
+        Video-Warteschlange (q0) ist ständig voll (169/169), Ton q1 0–2. Start über
+        FUN_00318FC0 (Modus 3, Lesefunktion 0x240B48 = NU-Read + Entschlüsselung 0x23F510),
+        Gesamtgröße 0x9C2E800 = Intro + Sparking-Intro als EIN Strom; das Video bricht mitten
+        in einer GOP ab (16/18 Bilder) = Übergang zum 2. Teil.
+      - Am Ende: in den letzten ~0,5 s 202 Nachlade-Callbacks (normal ~16 / 0,5 s) innerhalb
+        eines Bildes, ohne dass die IPU diese Daten dekodiert → q0 läuft leer → Abbruch
+        (libmpeg-Fehlerpfad erst als Folge). Offen: warum libmpeg die Puffer am Übergang
+        verbraucht (Verdacht: IPU_TO-Neustart verwirft vorausgelesene, nicht verbrauchte
+        Daten; Mitschrift „D start … qwc/fifo/pending“ in T5_IPUTRACE vorbereitet).
 
 # Bugliste (Nutzerbericht 14.10.2026) + Prioritäten
 

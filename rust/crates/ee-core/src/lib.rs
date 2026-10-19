@@ -96,6 +96,20 @@ pub static LAST_FN: AtomicU32 = AtomicU32::new(0);
 
 /// Function coverage (diagnostics, `T5_COVER`): one bit per word address of EE RAM.
 pub static COVER_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn watch_start() -> std::time::Instant {
+    static T: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *T.get_or_init(std::time::Instant::now)
+}
+
+/// T5_WATCHFN=<hex>[,<hex>...]: functions whose calls are logged.
+fn watch_fns() -> &'static [u32] {
+    static W: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+    W.get_or_init(|| {
+        watch_start();
+        std::env::var("T5_WATCHFN").map(|v| v.split(',').filter_map(|x| u32::from_str_radix(x.trim().trim_start_matches("0x"), 16).ok()).collect()).unwrap_or_default()
+    })
+}
 static COVER: std::sync::OnceLock<Vec<AtomicU32>> = std::sync::OnceLock::new();
 
 fn cover_map() -> &'static Vec<AtomicU32> {
@@ -338,6 +352,14 @@ impl Ctx {
         LAST_FN.store(addr, Relaxed);
         if COVER_ON.load(Relaxed) {
             cover_mark(addr);
+        }
+        if watch_fns().contains(&addr) {
+            // T5_WATCHFN=<hex address>: log the arguments of every call (watchfn.txt).
+            use std::io::Write;
+            let q0 = self.ld(self.gpr32(4).wrapping_add(0x40F8 + 0x1C), 4);
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("watchfn.txt") {
+                let _ = writeln!(f, "{} {addr:08x} a0 {:x} a1 {:x} a2 {:x} a3 {:x} ra {:x} q(a0+0x40f8) {q0}", watch_start().elapsed().as_millis(), self.gpr32(4), self.gpr32(5), self.gpr32(6), self.gpr32(7), self.gpr32(31));
+            }
         }
         let bypass = self.bypass == addr;
         if bypass {

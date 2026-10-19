@@ -718,6 +718,10 @@ fn dump_in(v: u128, csc: bool) {
 /// `T5_IPUTRACE=<file>`: every BCLR, VDEC (result) and BDEC (hash of its output), one line each,
 /// so a game run can be compared with the decode of the same stream in `tests::mpeg_stream_sync`
 /// (which writes the same lines through this function when the variable is set).
+fn trace_text(line: String) {
+    trace(u32::MAX, 0, &[], &line);
+}
+
 fn trace_on() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("T5_IPUTRACE").is_some())
@@ -731,7 +735,7 @@ fn trace(cmd: u32, data: u32, out: &[u128], pre: &str) {
         Some(Mutex::new((std::io::BufWriter::new(std::fs::File::create(path).ok()?), 0)))
     }) else { return };
     let mut g = f.lock().unwrap();
-    let line = match cmd >> 28 {
+    let line = if cmd == u32::MAX { pre.to_string() } else { match cmd >> 28 {
         0 => format!("C {cmd:08x}
 "),
         3 => format!("V {cmd:08x} {:04x}
@@ -744,11 +748,11 @@ fn trace(cmd: u32, data: u32, out: &[u128], pre: &str) {
             format!("B {cmd:08x} {h:016x}{pre}
 ")
         }
-    };
+    } };
     let _ = g.0.write_all(line.as_bytes());
     g.1 += 1;
     // Flushed at every BCLR (picture / stream boundaries) and every 1024 lines.
-    if g.1 % 1024 == 0 || cmd >> 28 == 0 {
+    if g.1 % 1024 == 0 || cmd >> 28 == 0 || cmd == u32::MAX {
         let _ = g.0.flush();
     }
 }
@@ -1023,6 +1027,12 @@ pub fn fifo_write(m: &mut Machine, v: u128) {
 
 /// IPU_TO started: data flows into the FIFO as there is room.
 pub fn dma_start(m: &mut Machine) {
+    if trace_on() {
+        let (fifo, pend) = (m.ipu.fifo.len(), m.ipu.pending);
+        let ch = &m.dmac.ch[dmac::IPU_TO];
+        trace_text(format!("D start madr {:x} qwc {} fifo {fifo} pending {pend:x?}
+", ch.madr, ch.qwc));
+    }
     m.ipu.to_end = false;
     if crate::diag::enabled("T5_IPULOG") {
         let ch = &m.dmac.ch[dmac::IPU_TO];
