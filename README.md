@@ -1,4 +1,25 @@
-# Tekken5Decomp: Tekken 5 (SLUS-21059, PlayStation 2), Spreadsheet Method
+# Tekken 5 Recomp (Rust)
+
+A static recompilation of **Tekken 5** (PlayStation 2, SLUS-21059) to native Rust: the Emotion Engine programs, the IOP modules and the VU microcode run on a PS2 runtime written for this project inside a Bevy app.
+
+**Status:** the main game is playable. **Arcade History mode (Tekken 1–3) is work in progress** (the `tekken1`..`tekken3` programs are recompiled, the mode is not finished yet).
+
+> **No game files in this repository.** It contains only the recompiler tooling, the console
+> runtime and the app written for this project. The game's code and data are generated
+> locally from **your own legally obtained disc image**; ROMs, disc images, extracted files and
+> generated code are never committed (see `.gitignore`). Tekken is a trademark of Bandai Namco
+> Entertainment. This is an unofficial fan/research project, not affiliated with or endorsed by
+> Bandai Namco or Sony.
+
+## Quick start: bring your own disc
+
+1. Dump your own copy of **Tekken 5 (USA, SLUS-21059)** to an `.iso`.
+2. Put it at `game/Tekken 5 (USA).iso` in this folder, or point `T5_DISC` at it.
+3. Install Python 3, a Rust toolchain, Ghidra 12.1.4 and ghidra-cli.
+4. Generate the code from your disc (see [Rebuilding from the disc](#rebuilding-from-the-disc)).
+   This creates `sheets/`, `src/` and the generated crates under `rust/`.
+5. Run `./play.sh` (Linux) or `play.bat` (Windows).
+
 
 The CSVs in `sheets/` are the **single source of truth** for all of the game's code: the seven
 Emotion Engine programs on the disc and the seven IOP modules the game runs on the I/O processor.
@@ -30,7 +51,7 @@ rust/ (Bevy app)                                     src/raw_c, src/units (C)
 
 Run **`play.bat`**. The first run builds everything (that takes a while: about 1.6 million
 recompiled instructions), later runs start in seconds. The disc image is read from `T5_DISC`,
-which defaults to `E:\Decompilation\Game\Tekken 5 (USA).iso`.
+which defaults to `game\Tekken 5 (USA).iso`.
 
 - Keyboard and gamepads work at once. F2 rebinds controls (`%APPDATA%\Tekken5Decomp\controls.json`).
   Default keyboard: arrows / WASD = D-pad, X or Space = Cross, C = Circle, Z = Square,
@@ -51,15 +72,15 @@ Python 3, Ghidra 12.1.4 with ghidra-emotionengine-reloaded 2.1.38 (**patched by
 `tools/fix_ee_sleigh.py`**, see below), ghidra-cli and a Rust toolchain.
 
 ```bat
-set ISO=E:\Decompilation\Game\Tekken 5 (USA).iso
-set W=E:\Decompilation\Decomps\Tekken5
+set ISO=game\Tekken 5 (USA).iso
+set W=C:\work\Tekken5
 cd tools
 python fix_ee_sleigh.py
 python ps2_extract.py "%ISO%" %W%\extracted
 python tk5data.py "%ISO%" %W%\extracted
 python make_elfs.py %W%\extracted
 python iop_modules.py %W%\extracted
-set GHIDRA=E:\Decompilation\Tools\ghidra-cli\target\release\ghidra.exe
+set GHIDRA=C:\tools\ghidra-cli\target\release\ghidra.exe
 set T5_WORK=%W%
 bash run_ghidra.sh
 set IOP=1& bash run_ghidra.sh
