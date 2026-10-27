@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Launch the recompiled Tekken 5 on Linux (builds first if needed; the first build takes a while).
-# The disc image defaults to ../../Game/Tekken 5 (USA).iso; set T5_DISC to use another one.
+# The disc image defaults to game/Tekken 5 (USA).iso; set T5_DISC to use another one.
 # Memory cards are folders: memcard/port0 and memcard/port1 next to this file.
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
-: "${T5_DISC:=$here/../../Game/Tekken 5 (USA).iso}"
+: "${T5_DISC:=$here/game/Tekken 5 (USA).iso}"
 if [ ! -f "$T5_DISC" ]; then
     echo "Disc image not found: \"$T5_DISC\""
     echo "Set T5_DISC to the path of the Tekken 5 .iso file."

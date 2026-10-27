@@ -7,7 +7,7 @@ pub use table::PROGRAMS;
 
 /// The disc image: T5_DISC, else the default location.
 pub fn disc_path() -> String {
-    std::env::var("T5_DISC").unwrap_or_else(|_| r"E:\Decompilation\Game\Tekken 5 (USA).iso".to_string())
+    std::env::var("T5_DISC").unwrap_or_else(|_| r"../game/Tekken 5 (USA).iso".to_string())
 }
 
 /// Create the machine (RAM, devices, the disc) and return what the front end shares with it.

@@ -1188,7 +1188,7 @@ mod tests {
     /// Needs the disc image (T5_DISC or the default path).
     #[test]
     fn mpeg_stream_sync() {
-        let iso = std::env::var("T5_DISC").unwrap_or_else(|_| r"E:\Decompilation\Game\Tekken 5 (USA).iso".into());
+        let iso = std::env::var("T5_DISC").unwrap_or_else(|_| r"../game/Tekken 5 (USA).iso".into());
         if !std::path::Path::new(&iso).exists() {
             eprintln!("no disc image, skipped");
             return;
